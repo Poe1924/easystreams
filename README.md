@@ -14,7 +14,10 @@ Il progetto è progettato per essere versatile e può essere utilizzato in due m
 -   **GuardaHD** (Film)
 -   **GuardoSerie** (Film & Serie TV)
 -   **StreamingCommunity** (Film & Serie TV)
--   **CB01** (Film & Serie TV)
+-   **VidxGo** (Film & Serie TV)
+-   **AltadefinizioneStreaming** (Film & Serie TV)
+-   **Mediaset Infinity / WittyTV** (Film & Serie TV ufficiali gratuiti)
+-   **RaiPlay** (Film & Serie TV ufficiali gratuiti)
 
 ---
 
@@ -67,6 +70,20 @@ Tuttavia, tieni presente che **alcuni provider potrebbero non funzionare** a cau
 ## ⚙️ Configurazione Avanzata (Addon Stremio)
 
 Quando l'addon viene eseguito su un server remoto (non in locale), alcuni provider potrebbero riscontrare problemi tecnici dovuti alle protezioni dei siti sorgente.
+
+### EasyProxy
+
+Mediaset Infinity, WittyTV, RaiPlay e gli altri provider che richiedono EasyProxy
+usano gli stessi endpoint configurati nella pagina dell'addon. È possibile
+inserire uno o più indirizzi con password e scegliere la modalità failover o
+bilanciamento. I contenuti ufficiali vengono verificati prima di essere mostrati:
+quelli a pagamento o non disponibili non vengono restituiti al player.
+
+La qualità visualizzata deriva dal manifest effettivo: `HD` per 720p e `FHD` per
+1080p. Il flusso adattivo conserva comunque tutte le varianti pubblicate dal
+provider. La ricerca esegue soltanto un controllo leggero; estrazione e gestione
+DRM restano differite al momento della riproduzione tramite il normale endpoint
+EasyProxy `/extractor/video.m3u8` con `redirect_stream=true`.
 
 
 ### ⚡ SuperVideo (Proxy Cloudflare Worker)
