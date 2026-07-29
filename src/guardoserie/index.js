@@ -248,6 +248,8 @@ if (!IS_SERVER) {
 
         // Preferred patterns (common WordPress themes + Guardoserie specific)
         const patterns = [
+            /<a[^>]+href=["']([^"']+)["'][^>]*title=["']([^"']+)["']/gi,
+            /<a[^>]+title=["']([^"']+)["'][^>]*href=["']([^"']+)["']/gi,
             /<a[^>]+href=["']([^"']+)["'][^>]*class=["'][^"']*ml-mask[^"']*["'][^>]*>.*?<h2>(.*?)<\/h2>/gis,
             /<div[^>]*class=["'][^"']*ml-item[^"']*["'][^>]*>.*?<a[^>]+href=["']([^"']+)["'][^>]*>.*?<h2>(.*?)<\/h2>/gis,
             /<h2[^>]*class=["'][^"']*entry-title[^"']*["'][^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi,
@@ -476,16 +478,14 @@ if (!IS_SERVER) {
                 if (parenMatch && parenMatch[1].trim().length > 2) results.push(parenMatch[1].trim());
                 return [...new Set(results)].filter(q => q.length > 2);
             };
-            const allQueries = [...new Set([...genQueries(title), ...genQueries(originalTitle)])].slice(0, 4);
+            const allQueries = [...new Set([...genQueries(title), ...genQueries(originalTitle)])].slice(0, 5);
 
             // Ricerca AJAX
             const searchProvider = async (query) => {
                 const searchStartedAt = Date.now();
-                try {
-                    await smartFetch(baseUrl, baseUrl, { provider: 'guardoserie', skipBypassOnFailure: true, timeout: 5000 });
-                } catch (e) {}
                 const searchUrl = `${baseUrl}/wp-admin/admin-ajax.php`;
-                const body = `s=${encodeURIComponent(query)}&action=searchwp_live_search&swpquery=${encodeURIComponent(query)}&swpengine=default`;
+                const enc = (s) => encodeURIComponent(s).replace(/%20/g, '+');
+                const body = `s=${enc(query)}&action=searchwp_live_search&swpengine=default&swpquery=${query}`;
                 try {
                     const ajaxHtml = await smartFetch(searchUrl, baseUrl, {
                         method: 'POST', body,
@@ -504,22 +504,12 @@ if (!IS_SERVER) {
                 }
             };
 
-            // Ricerca WordPress nativa
-            const searchWp = async (query) => {
-                try {
-                    const html = await smartFetch(`${baseUrl}/?s=${encodeURIComponent(query)}`, baseUrl, {
-                        method: 'GET', headers: { 'Referer': `${baseUrl}/`, 'Accept': 'text/html' },
-                        provider: 'guardoserie', skipBypassOnFailure: true, timeout: 5000
-                    });
-                    if (!html || html.length < 200) return [];
-                    return extractSearchResultsFromHtml(html, baseUrl);
-                } catch (e) { return []; }
-            };
-
-            // Esegui AJAX + WP per ogni query in parallelo
-            let allResults = Array.from(new Map((await Promise.all(
-                allQueries.map(q => Promise.all([searchProvider(q), searchWp(q)]))
-            )).flat(2).map(r => [r.url, r])).values());
+            // AJAX search only: try queries in parallel, pick first result
+            let allResults = [];
+            if (allQueries.length > 0) {
+                const results = await Promise.all(allQueries.map(q => searchProvider(q)));
+                allResults = results.find(r => r && r.length > 0) || [];
+            }
 
             mark('search_done', { queries: allQueries.length, results: allResults.length });
 
@@ -555,11 +545,10 @@ if (!IS_SERVER) {
             });
 
             targetUrl = null;
-            const topResults = allResults.slice(0, 5);
-            const verificationPromises = topResults.map(async (result) => {
+            for (const result of allResults.slice(0, 5)) {
                 const nResult = normalizeTitle(result.title);
                 const matchScore = scoreTitleMatch(nResult);
-                if (matchScore < 1) return null;
+                if (matchScore < 1) continue;
 
                 try {
                     const pageHtml = await smartFetch(result.url, getGuardoserieBaseUrl(), {
@@ -579,7 +568,8 @@ if (!IS_SERVER) {
                     }
 
                     if (hasTmdbId || hasExactPoster) {
-                        return { url: result.url, score: 3, exact: true };
+                        targetUrl = result.url;
+                        break;
                     }
 
                     if (foundYear) {
@@ -587,24 +577,21 @@ if (!IS_SERVER) {
                         const fYear = parseInt(foundYear);
                         const maxDiff = matchScore === 3 ? 10 : 1;
                         if (fYear === targetYear || Math.abs(fYear - targetYear) <= maxDiff) {
-                            return { url: result.url, score: matchScore, exact: true };
+                            targetUrl = result.url;
+                            break;
                         }
                     }
 
                     if (matchScore >= 2) {
-                        return { url: result.url, score: matchScore, exact: false };
+                        targetUrl = result.url;
+                        break;
                     }
                 } catch (e) {
-                    if (matchScore >= 2) return { url: result.url, score: matchScore, exact: false };
+                    if (matchScore >= 2) {
+                        targetUrl = result.url;
+                        break;
+                    }
                 }
-                return null;
-            });
-
-            const verifiedResults = (await Promise.all(verificationPromises)).filter(Boolean);
-            verifiedResults.sort((a, b) => b.score - a.score);
-
-            if (verifiedResults.length > 0) {
-                targetUrl = verifiedResults[0].url;
             }
 
             if (targetUrl) {
@@ -658,56 +645,48 @@ if (!IS_SERVER) {
 
         const streamPromises = playerLinks.map(async (playerLink) => {
             try {
+                let extracted;
                 if (playerLink.includes('loadm')) {
                     const domain = 'guardoserie.study';
-                    const extracted = await extractLoadm(playerLink, domain);
-                    return await Promise.all((extracted || []).map(async s => {
-                        let quality = "HD";
-                        const detected = await checkQualityFromPlaylist(s.url, s.headers);
-                        if (detected) quality = detected;
-                        return formatStream({
-                            url: s.url,
-                            headers: s.headers,
-                            name: `Guardoserie - Loadm`,
-                            title: displayName,
-                            quality: getQualityFromName(quality),
-                            type: "direct",
-                            language: 'Italian',
-                            behaviorHints: s.behaviorHints
-                        }, 'Guardoserie');
-                    }));
+                    extracted = await extractLoadm(playerLink, domain);
+                    if (!extracted) return [];
+                    const qualityResults = await Promise.all((extracted || []).map(s => checkQualityFromPlaylist(s.url, s.headers)));
+                    return extracted.map((s, i) => formatStream({
+                        url: s.url,
+                        headers: s.headers,
+                        name: `Guardoserie - Loadm`,
+                        title: displayName,
+                        quality: getQualityFromName(qualityResults[i] || "HD"),
+                        type: "direct",
+                        language: 'Italian',
+                        behaviorHints: s.behaviorHints
+                    }, 'Guardoserie'));
                 } else if (playerLink.includes('uqload')) {
-                    const extracted = await extractUqload(playerLink);
-                    if (extracted?.url) {
-                        let quality = "HD";
-                        const detected = await checkQualityFromPlaylist(extracted.url, extracted.headers);
-                        if (detected) quality = detected;
-                        return [formatStream({
-                            url: extracted.url,
-                            headers: extracted.headers,
-                            name: `Guardoserie - Uqload`,
-                            title: displayName,
-                            quality: getQualityFromName(quality),
-                            type: "direct",
-                            language: 'Italian'
-                        }, 'Guardoserie')];
-                    }
+                    extracted = await extractUqload(playerLink);
+                    if (!extracted?.url) return [];
+                    const quality = await checkQualityFromPlaylist(extracted.url, extracted.headers);
+                    return [formatStream({
+                        url: extracted.url,
+                        headers: extracted.headers,
+                        name: `Guardoserie - Uqload`,
+                        title: displayName,
+                        quality: getQualityFromName(quality || "HD"),
+                        type: "direct",
+                        language: 'Italian'
+                    }, 'Guardoserie')];
                 } else if (playerLink.includes('mixdrop') || playerLink.includes('m1xdrop')) {
-                    const extracted = await extractMixDrop(playerLink);
-                    if (extracted?.url) {
-                        let quality = "HD";
-                        const detected = await checkQualityFromPlaylist(extracted.url, extracted.headers);
-                        if (detected) quality = detected;
-                        return [formatStream({
-                            url: extracted.url,
-                            headers: extracted.headers,
-                            name: `Guardoserie - MixDrop`,
-                            title: displayName,
-                            quality: getQualityFromName(quality),
-                            type: "direct",
-                            language: 'Italian'
-                        }, 'Guardoserie')];
-                    }
+                    extracted = await extractMixDrop(playerLink);
+                    if (!extracted?.url) return [];
+                    const quality = await checkQualityFromPlaylist(extracted.url, extracted.headers);
+                    return [formatStream({
+                        url: extracted.url,
+                        headers: extracted.headers,
+                        name: `Guardoserie - MixDrop`,
+                        title: displayName,
+                        quality: getQualityFromName(quality || "HD"),
+                        type: "direct",
+                        language: 'Italian'
+                    }, 'Guardoserie')];
                 }
             } catch (e) { }
             return [];

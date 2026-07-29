@@ -59,7 +59,6 @@ async function smartFetch(url, domain, options = {}) {
     const loadSession = (providerName = provider, targetHost = urlHost) => {
         const targetSessionFile = sessionFileForProvider(providerName);
 
-        // Check memory cache first (disabled for guardoserie as requested)
         if (providerName !== 'guardoserie') {
             const cached = sessionCache.get(providerName);
             if (cached && cached.cookies && (Date.now() - cached.timestamp < 115 * 60 * 1000)) {
@@ -90,7 +89,6 @@ async function smartFetch(url, domain, options = {}) {
                             }
                         } catch (e) {}
                     }
-                    // Update memory cache (skipped for guardoserie)
                     if (providerName !== 'guardoserie') {
                         sessionCache.set(providerName, data);
                     }
