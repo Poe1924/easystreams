@@ -14,10 +14,7 @@ Il progetto è progettato per essere versatile e può essere utilizzato in due m
 -   **GuardaHD** (Film)
 -   **GuardoSerie** (Film & Serie TV)
 -   **StreamingCommunity** (Film & Serie TV)
--   **VidxGo** (Film & Serie TV)
--   **AltadefinizioneStreaming** (Film & Serie TV)
--   **Mediaset Infinity / WittyTV** (Film & Serie TV ufficiali gratuiti)
--   **RaiPlay** (Film & Serie TV ufficiali gratuiti)
+-   **CB01** (Film & Serie TV)
 
 ---
 
@@ -71,19 +68,16 @@ Tuttavia, tieni presente che **alcuni provider potrebbero non funzionare** a cau
 
 Quando l'addon viene eseguito su un server remoto (non in locale), alcuni provider potrebbero riscontrare problemi tecnici dovuti alle protezioni dei siti sorgente.
 
-### EasyProxy
+### EasyProxy e provider ufficiali
 
-Mediaset Infinity, WittyTV, RaiPlay e gli altri provider che richiedono EasyProxy
-usano gli stessi endpoint configurati nella pagina dell'addon. È possibile
-inserire uno o più indirizzi con password e scegliere la modalità failover o
-bilanciamento. I contenuti ufficiali vengono verificati prima di essere mostrati:
-quelli a pagamento o non disponibili non vengono restituiti al player.
+L'addon Stremio supporta anche Mediaset Infinity, WittyTV e RaiPlay tramite
+EasyProxy. Questi provider richiedono un indirizzo EasyProxy con password e non
+vengono avviati quando EasyProxy non è configurato.
 
-La qualità visualizzata deriva dal manifest effettivo: `HD` per 720p e `FHD` per
-1080p. Il flusso adattivo conserva comunque tutte le varianti pubblicate dal
-provider. La ricerca esegue soltanto un controllo leggero; estrazione e gestione
-DRM restano differite al momento della riproduzione tramite il normale endpoint
-EasyProxy `/extractor/video.m3u8` con `redirect_stream=true`.
+Mediaset, WittyTV e RaiPlay sono intenzionalmente disponibili soltanto
+nell'addon Stremio: non vengono inseriti nel manifest, nell'aggregatore o nei
+bundle dei provider Nuvio, perché i plugin Nuvio non possono ricevere la
+configurazione EasyProxy richiesta per riprodurli.
 
 
 ### ⚡ SuperVideo (Proxy Cloudflare Worker)
@@ -101,7 +95,7 @@ EasyProxy `/extractor/video.m3u8` con `redirect_stream=true`.
 ## 🛠️ Sviluppo
 
 -   **Struttura**: Ogni provider ha la sua cartella in `src/`.
--   **Build**: Lo script `build.js` compila i provider per Nuvio.
+-   **Build**: Lo script `build.js` compila i provider per Nuvio ed esclude i provider disponibili soltanto nell'addon Stremio.
 -   **Stremio**: Il file `stremio_addon.js` funge da server e adattatore per convertire i risultati dei provider nel formato Stremio.
 
 ---

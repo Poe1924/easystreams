@@ -7,8 +7,6 @@ const animesaturn = require('./animesaturn/index');
 
 const vidxgo = require('./vidxgo/index');
 const altadefinizionestreaming = require('./altadefinizionestreaming/index');
-const mediaset = require('./mediaset/index');
-const raiplay = require('./raiplay/index');
 const { createTimeoutSignal } = require('./fetch_helper.js');
 
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
@@ -186,9 +184,9 @@ async function getStreams(id, type, season, episode) {
     const selectedProviders = [];
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'streamingcommunity', 'guardahd');
+            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'streamingcommunity');
         } else {
-            selectedProviders.push('mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardahd', 'guardoserie', 'altadefinizionestreaming');
+            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming');
         }
     } else if (normalizedType === 'anime') {
         selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo');
@@ -197,13 +195,13 @@ async function getStreams(id, type, season, episode) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie');
         } else {
             if (isImdbRequest) {
-                selectedProviders.push('mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming');
+                selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming');
             } else {
-                selectedProviders.push('mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming');
+                selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming');
             }
         }
     } else {
-        selectedProviders.push('streamingcommunity', 'vidxgo', 'guardahd', 'guardoserie');
+        selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie');
     }
 
     for (const providerName of [...new Set(selectedProviders)]) {
@@ -268,22 +266,6 @@ async function getStreams(id, type, season, episode) {
                 altadefinizionestreaming.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
                     .then(s => ({ provider: 'AltadefinizioneStreaming', streams: s, status: 'fulfilled' }))
                     .catch(e => ({ provider: 'AltadefinizioneStreaming', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'mediaset') {
-            promises.push(
-                mediaset.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'Mediaset Infinity', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'Mediaset Infinity', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'raiplay') {
-            promises.push(
-                raiplay.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'RaiPlay', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'RaiPlay', error: e, status: 'rejected' }))
             );
             continue;
         }
