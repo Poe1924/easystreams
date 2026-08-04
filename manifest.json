@@ -1,11 +1,11 @@
 {
   "name": "EasyStreams",
-  "version": "1.3.23",
+  "version": "1.3.24",
   "scrapers": [
     {
       "id": "easystreams-partite",
       "name": "Partite.cc",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "description": "Film, serie TV and anime from Partite.cc",
       "resources": ["stream"],
       "contentLanguage": ["it"],
