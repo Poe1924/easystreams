@@ -235,14 +235,11 @@ function getStreams(id, type, season, episode) {
     const streams = [];
     for (const server of [1, 2, 3, 4, 5]) {
       const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
-      for (const quality of ["1080", ""]) {
-        const url = `${BASE_URL}${path}${quality ? `/${quality}` : ""}/playlist.m3u8`;
-        try {
-          const r = yield fetch(url, { method: "HEAD", headers: { Referer: `${BASE_URL}/` } });
-          if (r.ok) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? "Partite.cc" : `Partite.cc ${s}x${e}`, url, quality: quality ? `${quality}p` : "Unknown", language: "Italian", type: "hls", behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
-          if (r.ok) break;
-        } catch (_) {
-        }
+      const url = `${BASE_URL}${path}/playlist.m3u8`;
+      try {
+        const r = yield fetch(url, { method: "HEAD", headers: { Referer: `${BASE_URL}/` } });
+        if (r.ok) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? "Partite.cc" : `Partite.cc ${s}x${e}`, quality: "Unknown", language: "Italian", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
+      } catch (_) {
       }
     }
     return streams.filter(Boolean);
