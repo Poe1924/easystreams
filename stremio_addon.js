@@ -1595,10 +1595,10 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
     } else {
         if (isImdbRequest) {
             plan = likelyAnime
-                ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo']
+                ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite']
                 : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_SERIES) {
-            plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo'];
+            plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite'];
         } else {
             plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         }
