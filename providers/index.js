@@ -8301,7 +8301,7 @@ var require_guardoserie = __commonJS({
       };
     } else {
       let getGuardoserieBaseUrl2 = function() {
-        return "https://guardoserie.study";
+        return guardoserieBaseUrl;
       }, getMappingApiUrl2 = function() {
         return "https://animemapping.realbestia.com";
       }, normalizeConfigBoolean2 = function(value) {
@@ -8479,6 +8479,28 @@ var require_guardoserie = __commonJS({
       const { USER_AGENT, getProxiedUrl } = require_common();
       const { extractLoadm } = require_extractors();
       const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
+      const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+      let guardoserieBaseUrl = null;
+      let guardoserieConfigLoaded = false;
+      function loadGuardoserieBaseUrl() {
+        return __async(this, null, function* () {
+          if (guardoserieConfigLoaded) return;
+          guardoserieConfigLoaded = true;
+          if (!GUARDOSERIE_CONFIG_URL) return;
+          try {
+            const response = yield fetch(GUARDOSERIE_CONFIG_URL, {
+              headers: { Accept: "application/json" },
+              signal: AbortSignal.timeout(5e3)
+            });
+            if (!response.ok) return;
+            const config = yield response.json();
+            const baseUrl = String(config.guardoserie || "").trim().replace(/\/+$/, "");
+            if (/^https?:\/\//i.test(baseUrl)) guardoserieBaseUrl = baseUrl;
+          } catch (e) {
+            console.error("[Guardoserie] Config JSON error:", e.message);
+          }
+        });
+      }
       const TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
       function getIdsFromAnimeProvider(provider, externalId, season, episode, providerContext = null) {
         return __async(this, null, function* () {
@@ -8563,6 +8585,7 @@ var require_guardoserie = __commonJS({
       function getStreams2(id, type, season, episode, providerContext = null) {
         return __async(this, null, function* () {
           var _a, _b;
+          yield loadGuardoserieBaseUrl();
           const benchStart = Date.now();
           const bench = [];
           const mark = (step, meta = {}) => {
@@ -8822,7 +8845,7 @@ var require_guardoserie = __commonJS({
             try {
               let extracted;
               if (playerLink.includes("loadm")) {
-                const domain = "guardoserie.study";
+                const domain = new URL(getGuardoserieBaseUrl2()).hostname;
                 extracted = yield extractLoadm(playerLink, domain);
                 if (!extracted) return [];
                 const qualityResults = yield Promise.all((extracted || []).map((s) => checkQualityFromPlaylist(s.url, s.headers)));
@@ -12981,6 +13004,98 @@ var require_altadefinizionestreaming = __commonJS({
   }
 });
 
+// src/partite/index.js
+var require_partite = __commonJS({
+  "src/partite/index.js"(exports2, module2) {
+    var { formatStream } = require_formatter();
+    var BASE_URL = "https://www.partite.cc";
+    var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
+    function normalizeId(id) {
+      const value = String(id || "").trim();
+      const match = value.match(/(tt\d+)/i);
+      return match ? match[1] : null;
+    }
+    function resolveImdbId(id, type) {
+      return __async(this, null, function* () {
+        const raw = String(id || "").trim();
+        const direct = normalizeId(raw);
+        if (direct) return direct;
+        const match = raw.match(/^tmdb:(\d+)$/i) || raw.match(/^(\d+)$/);
+        if (!match) return null;
+        try {
+          const endpoint = String(type || "").toLowerCase() === "movie" ? "movie" : "tv";
+          const response = yield fetch(`https://api.themoviedb.org/3/${endpoint}/${match[1]}/external_ids?api_key=${TMDB_API_KEY2}`);
+          if (!response.ok) return null;
+          const data = yield response.json();
+          return normalizeId(data.imdb_id);
+        } catch (e) {
+          return null;
+        }
+      });
+    }
+    function fetchPageTitle(imdbId, isMovie) {
+      return __async(this, null, function* () {
+        try {
+          const pagePath = isMovie ? `/film/${imdbId}` : `/serie-tv/${imdbId}`;
+          const response = yield fetch(`${BASE_URL}${pagePath}`);
+          if (!response.ok) return null;
+          const html = yield response.text();
+          const match = html.match(/<h1[^>]*>\s*([^<]+?)\s*<\/h1>/i);
+          return match ? match[1].replace(/\s+/g, " ").trim() : null;
+        } catch (e) {
+          return null;
+        }
+      });
+    }
+    function getStreams2(id, type, season, episode) {
+      return __async(this, null, function* () {
+        const imdbId = yield resolveImdbId(id, type);
+        if (!imdbId) return [];
+        const normalizedType = String(type || "").toLowerCase();
+        const isMovie = normalizedType === "movie";
+        const effectiveSeason = Number.parseInt(season, 10) || 1;
+        const effectiveEpisode = Number.parseInt(episode, 10) || 1;
+        const realTitle = (yield fetchPageTitle(imdbId, isMovie)) || "Partite.cc";
+        const candidates = [1, 2, 3, 4, 5].flatMap((server) => {
+          const basePath = isMovie ? `/hls/s${server}/movie/${imdbId}` : `/hls/s${server}/serial/${imdbId}/${effectiveSeason}/${effectiveEpisode}`;
+          return [
+            { server, quality: 1080, playbackUrl: `${BASE_URL}${basePath}/1080/playlist.m3u8` },
+            { server, quality: null, playbackUrl: `${BASE_URL}${basePath}/playlist.m3u8` }
+          ];
+        });
+        const available = yield Promise.all([1, 2, 3, 4, 5].map((server) => __async(null, null, function* () {
+          const serverCandidates = candidates.filter((item) => item.server === server);
+          for (const candidate of serverCandidates) {
+            try {
+              const response = yield fetch(candidate.playbackUrl, {
+                method: "HEAD",
+                headers: { Referer: `${BASE_URL}/` }
+              });
+              const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+              if (response.ok && (contentType.includes("mpegurl") || contentType.includes("m3u8"))) return candidate;
+            } catch (e) {
+            }
+          }
+          return null;
+        })));
+        return available.filter(Boolean).map(({ server, quality, playbackUrl }) => formatStream({
+          name: `Partite.cc Server ${server}`,
+          title: isMovie ? realTitle : `${realTitle} S${effectiveSeason}E${effectiveEpisode}`,
+          url: playbackUrl,
+          quality: quality ? `${quality}p` : "Unknown",
+          language: "Italian",
+          type: "hls",
+          behaviorHints: {
+            notWebReady: true,
+            proxyHeaders: { request: { Referer: `${BASE_URL}/` } }
+          }
+        }, "Partite.cc")).filter(Boolean);
+      });
+    }
+    module2.exports = { getStreams: getStreams2 };
+  }
+});
+
 // src/index.js
 var guardoserie = require_guardoserie();
 var streamingcommunity = require_streamingcommunity();
@@ -12989,6 +13104,7 @@ var animeworld = require_animeworld();
 var animesaturn = require_animesaturn();
 var vidxgo = require_vidxgo2();
 var altadefinizionestreaming = require_altadefinizionestreaming();
+var partite = require_partite();
 var { createTimeoutSignal } = require_fetch_helper();
 var TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 var CONTEXT_TIMEOUT = 3e3;
@@ -13168,7 +13284,7 @@ function getStreams(id, type, season, episode) {
       if (likelyAnime || isAnimeProviderRequest) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
       } else {
-        selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming");
+        selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
       }
     } else if (normalizedType === "anime") {
       selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo");
@@ -13177,9 +13293,9 @@ function getStreams(id, type, season, episode) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
       } else {
         if (isImdbRequest) {
-          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming");
+          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
         } else {
-          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming");
+          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
         }
       }
     } else {
@@ -13219,6 +13335,12 @@ function getStreams(id, type, season, episode) {
       if (providerName === "vidxgo") {
         promises.push(
           vidxgo.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext).then((s) => ({ provider: "VidxGo", streams: s, status: "fulfilled" })).catch((e) => ({ provider: "VidxGo", error: e, status: "rejected" }))
+        );
+        continue;
+      }
+      if (providerName === "partite") {
+        promises.push(
+          partite.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext).then((s) => ({ provider: "Partite.cc", streams: s, status: "fulfilled" })).catch((e) => ({ provider: "Partite.cc", error: e, status: "rejected" }))
         );
         continue;
       }

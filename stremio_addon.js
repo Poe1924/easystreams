@@ -68,6 +68,16 @@ console.error = (...args) => originalConsoleError(...sanitizeLogArgs(args));
 // flareManager removed in favor of Scrapling
 
 const { getClearance, getStats: getFlareStats } = require('./cf_bypass');
+const GUARDOSERIE_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json';
+
+async function getGuardoserieBaseUrl() {
+    const response = await fetch(GUARDOSERIE_CONFIG_URL, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error(`Config HTTP ${response.status}`);
+    const config = await response.json();
+    const baseUrl = String(config.guardoserie || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(baseUrl)) throw new Error('Config baseUrl non valido');
+    return baseUrl;
+}
 
 function logInfo(...args) {
     console.log(...args);
@@ -1507,6 +1517,7 @@ const providers = {
     streamingcommunity: require('./src/streamingcommunity/index.js'),
     mediaset: require('./src/mediaset/index.js'),
     raiplay: require('./src/raiplay/index.js'),
+    partite: require('./src/partite/index.js'),
 
 };
 
@@ -1573,11 +1584,11 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
         } else if (isImdbRequest) {
             plan = likelyAnime
                 ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie']
-                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming'];
+                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_MOVIES) {
             plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie'];
         } else {
-            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming'];
+            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         }
     } else if (normalizedType === 'anime') {
         plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo'];
@@ -1585,11 +1596,11 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
         if (isImdbRequest) {
             plan = likelyAnime
                 ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo']
-                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming'];
+                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_SERIES) {
             plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo'];
         } else {
-            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming'];
+            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         }
     }
 
@@ -2712,7 +2723,8 @@ async function warmupGuardoserie(force = false) {
 
     try {
         console.log('[Warmup] Riscaldamento Guardoserie...');
-        await getClearance('https://guardoserie.study/', 'guardoserie', {
+        const baseUrl = await getGuardoserieBaseUrl();
+        await getClearance(`${baseUrl}/`, 'guardoserie', {
             maxTimeout: readPositiveIntEnv('CF_WARMUP_MAX_TIMEOUT_MS', 35000),
             requestTimeout: readPositiveIntEnv('CF_WARMUP_REQUEST_TIMEOUT_MS', 45000),
             waitUntil: 'network_idle'
