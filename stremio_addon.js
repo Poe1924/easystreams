@@ -1591,7 +1591,7 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
             plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
         }
     } else if (normalizedType === 'anime') {
-        plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo'];
+        plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite'];
     } else {
         if (isImdbRequest) {
             plan = likelyAnime

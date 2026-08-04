@@ -220,7 +220,7 @@ async function getStreams(id, type, season, episode) {
             selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite');
         }
     } else if (normalizedType === 'anime') {
-        selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo');
+        selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite');
     } else if (normalizedType === 'tv' || normalizedType === 'series') {
         if (likelyAnime) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie');

@@ -13020,6 +13020,23 @@ var require_partite = __commonJS({
         const raw = String(id || "").trim();
         const direct = normalizeId(raw);
         if (direct) return direct;
+        const animeId = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?(?::(\d+))?$/i);
+        if (animeId) {
+          try {
+            const provider = animeId[1].toLowerCase();
+            const mappedSeason = animeId[4] ? animeId[3] : "1";
+            const mappedEpisode = animeId[4] || animeId[3] || "1";
+            const response = yield fetch(`https://animemapping.realbestia.com/${provider}/${animeId[2]}?s=${mappedSeason}&ep=${mappedEpisode}&lang=it`);
+            if (response.ok) {
+              const payload = yield response.json();
+              const mapped = payload && payload.mappings && payload.mappings.ids;
+              const mappedImdb = normalizeId(mapped && mapped.imdb);
+              if (mappedImdb) return mappedImdb;
+            }
+          } catch (e) {
+          }
+          return null;
+        }
         const match = raw.match(/^tmdb:(\d+)$/i) || raw.match(/^(\d+)$/);
         if (!match) return null;
         try {
@@ -13053,7 +13070,8 @@ var require_partite = __commonJS({
         if (!imdbId) return [];
         const normalizedType = String(type || "").toLowerCase();
         const isMovie = normalizedType === "movie";
-        const effectiveSeason = Number.parseInt(season, 10) || 1;
+        const animeSeason = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
+        const effectiveSeason = Number.parseInt(animeSeason ? animeSeason[1] : season, 10) || 1;
         const effectiveEpisode = Number.parseInt(episode, 10) || 1;
         const realTitle = (yield fetchPageTitle(imdbId, isMovie)) || "Partite.cc";
         const candidates = [1, 2, 3, 4, 5].flatMap((server) => {
@@ -13287,7 +13305,7 @@ function getStreams(id, type, season, episode) {
         selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
       }
     } else if (normalizedType === "anime") {
-      selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo");
+    selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo", "partite");
     } else if (normalizedType === "tv" || normalizedType === "series") {
       if (likelyAnime) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
