@@ -16,9 +16,11 @@ async function resolveImdbId(id, type, season, episode) {
   const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?(?::(\d+))?$/i);
   if (anime) {
     try {
-      const s = anime[4] ? anime[3] : season || 1;
+      const s = anime[4] ? anime[3] : null;
       const ep = anime[4] || anime[3] || episode || 1;
-      const r = await fetch(`${MAPPING_URL}/${anime[1].toLowerCase()}/${anime[2]}?s=${s}&ep=${ep}&lang=it`);
+      const query = new URLSearchParams({ ep: String(ep), lang: 'it' });
+      if (s) query.set('s', s);
+      const r = await fetch(`${MAPPING_URL}/${anime[1].toLowerCase()}/${anime[2]}?${query}`);
       if (r.ok) {
         const payload = await r.json();
         const ep = payload?.mappings?.tmdb_episode || payload?.tmdb_episode;
