@@ -61,7 +61,9 @@ async function getStreams(id, type, season, episode) {
         const heights = [...text.matchAll(/RESOLUTION=\d+x(\d+)/gi)].map(m => Number(m[1])).filter(Boolean);
         const height = Math.max(0, ...heights);
         const quality = height >= 2160 ? '4K' : height >= 1440 ? '1440p' : height >= 1080 ? '1080p' : height >= 720 ? '720p' : height ? `${height}p` : 'Unknown';
-        if (/#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text)) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? 'Partite.cc' : `Partite.cc ${s}x${e}`, quality, language: 'Italian', type: 'hls', url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, 'Partite.cc'));
+        const hasItalianAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO[^\r\n]*(?:LANGUAGE="(?:it|ita)"|NAME="(?:Italian|Italiano))/i.test(text);
+        const hasAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text);
+        if (hasAudio) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? 'Partite.cc' : `Partite.cc ${s}x${e}`, quality, language: hasItalianAudio ? 'Italian' : '', type: 'hls', url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, 'Partite.cc'));
       }
     } catch (_) {}
   }
