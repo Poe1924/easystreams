@@ -185,7 +185,7 @@ function imdb(value) {
   const match = String(value || "").match(/tt\d+/i);
   return match ? match[0] : null;
 }
-function resolveImdbId(id, type, season) {
+function resolveImdbId(id, type, season, episode) {
   return __async(this, null, function* () {
     var _a, _b, _c;
     const raw = String(id || "").trim();
@@ -195,7 +195,7 @@ function resolveImdbId(id, type, season) {
     if (anime) {
       try {
         const s = anime[4] ? anime[3] : season || 1;
-        const ep = anime[4] || anime[3] || 1;
+        const ep = anime[4] || anime[3] || episode || 1;
         const r = yield fetch(`${MAPPING_URL}/${anime[1].toLowerCase()}/${anime[2]}?s=${s}&ep=${ep}&lang=it`);
         if (r.ok) {
           const payload = yield r.json();
@@ -223,7 +223,7 @@ function getStreams(id, type, season, episode) {
     const animeSeasonEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
     let s = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[1]) || season, 10) || 1;
     let e = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[2]) || (animeEpisode == null ? void 0 : animeEpisode[1]) || episode, 10) || 1;
-    const imdbId = yield resolveImdbId(id, type, s);
+    const imdbId = yield resolveImdbId(id, type, s, e);
     const resolved = typeof imdbId === "string" ? { imdbId } : imdbId;
     if (!(resolved == null ? void 0 : resolved.imdbId)) return [];
     const mappedSeason = Number.parseInt(resolved.season, 10);
