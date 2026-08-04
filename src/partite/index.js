@@ -55,8 +55,14 @@ async function getStreams(id, type, season, episode) {
     const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
     const url = `${BASE_URL}${path}/playlist.m3u8`;
     try {
-      const r = await fetch(url, { method: 'HEAD', headers: { Referer: `${BASE_URL}/` } });
-      if (r.ok) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? 'Partite.cc' : `Partite.cc ${s}x${e}`, quality: 'Unknown', language: 'Italian', type: 'hls', url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, 'Partite.cc'));
+      const r = await fetch(url, { headers: { Referer: `${BASE_URL}/` } });
+      if (r.ok) {
+        const text = await r.text();
+        const heights = [...text.matchAll(/RESOLUTION=\d+x(\d+)/gi)].map(m => Number(m[1])).filter(Boolean);
+        const height = Math.max(0, ...heights);
+        const quality = height >= 2160 ? '4K' : height >= 1440 ? '1440p' : height >= 1080 ? '1080p' : height >= 720 ? '720p' : height ? `${height}p` : 'Unknown';
+        if (/#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text)) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? 'Partite.cc' : `Partite.cc ${s}x${e}`, quality, language: 'Italian', type: 'hls', url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, 'Partite.cc'));
+      }
     } catch (_) {}
   }
   return streams.filter(Boolean);
