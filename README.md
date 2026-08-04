@@ -15,6 +15,7 @@ Il progetto è progettato per essere versatile e può essere utilizzato in due m
 -   **StreamingCommunity** (Film & Serie TV)
 -   **AltadefinizioneStreaming** (Film & Serie TV)
 -   **VidxGo** (Film & Serie TV - solo Addon Stremio con EasyProxy)
+-   **Partite** (Film , Serie TV & Anime)
 -   **Mediaset Infinity** (TV & VOD - solo Addon Stremio con EasyProxy)
 -   **RaiPlay** (TV & VOD - solo Addon Stremio con EasyProxy)
 -   **WittyTV** (TV & VOD - solo Addon Stremio con EasyProxy)
