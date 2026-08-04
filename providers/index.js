@@ -13010,104 +13010,72 @@ var require_partite = __commonJS({
     var { formatStream } = require_formatter();
     var BASE_URL = "https://www.partite.cc";
     var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
-    function normalizeId(id) {
-      const value = String(id || "").trim();
-      const match = value.match(/(tt\d+)/i);
-      return match ? match[1] : null;
+    var MAPPING_URL = "https://animemapping.realbestia.com";
+    function imdb(value) {
+      const match = String(value || "").match(/tt\d+/i);
+      return match ? match[0] : null;
     }
-    function resolveImdbId(id, type) {
+    function resolveImdbId(id, type, season) {
       return __async(this, null, function* () {
+        var _a, _b, _c;
         const raw = String(id || "").trim();
-        const direct = normalizeId(raw);
+        const direct = imdb(raw);
         if (direct) return direct;
-        const animeId = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?(?::(\d+))?$/i);
-        if (animeId) {
+        const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?(?::(\d+))?$/i);
+        if (anime) {
           try {
-            const provider = animeId[1].toLowerCase();
-            const mappedSeason = animeId[4] ? animeId[3] : "1";
-            const mappedEpisode = animeId[4] || animeId[3] || "1";
-            const response = yield fetch(`https://animemapping.realbestia.com/${provider}/${animeId[2]}?s=${mappedSeason}&ep=${mappedEpisode}&lang=it`);
-            if (response.ok) {
-              const payload = yield response.json();
-              const mapped = payload && payload.mappings && payload.mappings.ids;
-              const mappedImdb = normalizeId(mapped && mapped.imdb);
-              if (mappedImdb) return mappedImdb;
+            const s = anime[4] ? anime[3] : season || 1;
+            const ep = anime[4] || anime[3] || 1;
+            const r = yield fetch(`${MAPPING_URL}/${anime[1].toLowerCase()}/${anime[2]}?s=${s}&ep=${ep}&lang=it`);
+            if (r.ok) {
+              const payload = yield r.json();
+              const ep2 = ((_a = payload == null ? void 0 : payload.mappings) == null ? void 0 : _a.tmdb_episode) || (payload == null ? void 0 : payload.tmdb_episode);
+              return { imdbId: imdb((_c = (_b = payload == null ? void 0 : payload.mappings) == null ? void 0 : _b.ids) == null ? void 0 : _c.imdb), season: ep2 == null ? void 0 : ep2.season, episode: ep2 == null ? void 0 : ep2.episode };
             }
-          } catch (e) {
+          } catch (_) {
           }
           return null;
         }
         const match = raw.match(/^tmdb:(\d+)$/i) || raw.match(/^(\d+)$/);
         if (!match) return null;
         try {
-          const endpoint = String(type || "").toLowerCase() === "movie" ? "movie" : "tv";
-          const response = yield fetch(`https://api.themoviedb.org/3/${endpoint}/${match[1]}/external_ids?api_key=${TMDB_API_KEY2}`);
-          if (!response.ok) return null;
-          const data = yield response.json();
-          return normalizeId(data.imdb_id);
-        } catch (e) {
-          return null;
-        }
-      });
-    }
-    function fetchPageTitle(imdbId, isMovie) {
-      return __async(this, null, function* () {
-        try {
-          const pagePath = isMovie ? `/film/${imdbId}` : `/serie-tv/${imdbId}`;
-          const response = yield fetch(`${BASE_URL}${pagePath}`);
-          if (!response.ok) return null;
-          const html = yield response.text();
-          const match = html.match(/<h1[^>]*>\s*([^<]+?)\s*<\/h1>/i);
-          return match ? match[1].replace(/\s+/g, " ").trim() : null;
-        } catch (e) {
+          const endpoint = String(type).toLowerCase() === "movie" ? "movie" : "tv";
+          const r = yield fetch(`https://api.themoviedb.org/3/${endpoint}/${match[1]}/external_ids?api_key=${TMDB_API_KEY2}`);
+          return r.ok ? imdb((yield r.json()).imdb_id) : null;
+        } catch (_) {
           return null;
         }
       });
     }
     function getStreams2(id, type, season, episode) {
       return __async(this, null, function* () {
-        const imdbId = yield resolveImdbId(id, type);
-        if (!imdbId) return [];
-        const normalizedType = String(type || "").toLowerCase();
-        const isMovie = normalizedType === "movie";
-        const animeSeason = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
-        const effectiveSeason = Number.parseInt(animeSeason ? animeSeason[1] : season, 10) || 1;
-        const effectiveEpisode = Number.parseInt(episode, 10) || 1;
-        const realTitle = (yield fetchPageTitle(imdbId, isMovie)) || "Partite.cc";
-        const candidates = [1, 2, 3, 4, 5].flatMap((server) => {
-          const basePath = isMovie ? `/hls/s${server}/movie/${imdbId}` : `/hls/s${server}/serial/${imdbId}/${effectiveSeason}/${effectiveEpisode}`;
-          return [
-            { server, quality: 1080, playbackUrl: `${BASE_URL}${basePath}/1080/playlist.m3u8` },
-            { server, quality: null, playbackUrl: `${BASE_URL}${basePath}/playlist.m3u8` }
-          ];
-        });
-        const available = yield Promise.all([1, 2, 3, 4, 5].map((server) => __async(null, null, function* () {
-          const serverCandidates = candidates.filter((item) => item.server === server);
-          for (const candidate of serverCandidates) {
+        const animeEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+)$/i);
+        const animeSeasonEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
+        let s = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[1]) || season, 10) || 1;
+        let e = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[2]) || (animeEpisode == null ? void 0 : animeEpisode[1]) || episode, 10) || 1;
+        const imdbId = yield resolveImdbId(id, type, s);
+        const resolved = typeof imdbId === "string" ? { imdbId } : imdbId;
+        if (!(resolved == null ? void 0 : resolved.imdbId)) return [];
+        const mappedSeason = Number.parseInt(resolved.season, 10);
+        const mappedEpisode = Number.parseInt(resolved.episode, 10);
+        if (mappedSeason > 0) s = mappedSeason;
+        if (mappedEpisode > 0) e = mappedEpisode;
+        const finalImdbId = resolved.imdbId;
+        const movie = String(type).toLowerCase() === "movie";
+        const streams = [];
+        for (const server of [1, 2, 3, 4, 5]) {
+          const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
+          for (const quality of ["1080", ""]) {
+            const url = `${BASE_URL}${path}${quality ? `/${quality}` : ""}/playlist.m3u8`;
             try {
-              const response = yield fetch(candidate.playbackUrl, {
-                method: "HEAD",
-                headers: { Referer: `${BASE_URL}/` }
-              });
-              const contentType = String(response.headers.get("content-type") || "").toLowerCase();
-              if (response.ok && (contentType.includes("mpegurl") || contentType.includes("m3u8"))) return candidate;
-            } catch (e) {
+              const r = yield fetch(url, { method: "HEAD", headers: { Referer: `${BASE_URL}/` } });
+              if (r.ok) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? "Partite.cc" : `Partite.cc ${s}x${e}`, url, quality: quality ? `${quality}p` : "Unknown", language: "Italian", type: "hls", behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
+              if (r.ok) break;
+            } catch (_) {
             }
           }
-          return null;
-        })));
-        return available.filter(Boolean).map(({ server, quality, playbackUrl }) => formatStream({
-          name: `Partite.cc Server ${server}`,
-          title: isMovie ? realTitle : `${realTitle} S${effectiveSeason}E${effectiveEpisode}`,
-          url: playbackUrl,
-          quality: quality ? `${quality}p` : "Unknown",
-          language: "Italian",
-          type: "hls",
-          behaviorHints: {
-            notWebReady: true,
-            proxyHeaders: { request: { Referer: `${BASE_URL}/` } }
-          }
-        }, "Partite.cc")).filter(Boolean);
+        }
+        return streams.filter(Boolean);
       });
     }
     module2.exports = { getStreams: getStreams2 };
@@ -13305,7 +13273,7 @@ function getStreams(id, type, season, episode) {
         selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
       }
     } else if (normalizedType === "anime") {
-    selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo", "partite");
+      selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo", "partite");
     } else if (normalizedType === "tv" || normalizedType === "series") {
       if (likelyAnime) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
