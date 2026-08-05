@@ -2613,8 +2613,17 @@ function sendConfigurePage(res, initialConfig = {}) {
     }));
 }
 
-function sendManifest(res) {
+function sendManifest(res, config = {}) {
     const manifest = JSON.parse(JSON.stringify(addonInterface.manifest));
+    const disabledProviders = new Set(String(config?.disabledProviders || '')
+        .split(',')
+        .map((name) => name.trim().toLowerCase())
+        .filter(Boolean));
+    const proxyProvidersDisabled = ['vidxgo', 'mediaset', 'raiplay']
+        .every((name) => disabledProviders.has(name));
+    if (resolveEasyProxyEntriesFromConfig(config).length === 0 && !proxyProvidersDisabled) {
+        manifest.description = `${manifest.description} ⚠️ EasyProxy non configurato: VidxGo, Mediaset Infinity e RaiPlay funzionano solo con EasyProxy.`;
+    }
     manifest.behaviorHints = {
         ...(manifest.behaviorHints || {}),
         configurable: true
@@ -2636,11 +2645,11 @@ app.get('/:config/configure', (req, res) => {
 });
 
 app.get('/manifest.json', (req, res) => {
-    sendManifest(res);
+    sendManifest(res, {});
 });
 
 app.get('/:config/manifest.json', (req, res) => {
-    sendManifest(res);
+    sendManifest(res, parseConfigPathParam(req.params.config));
 });
 
 app.use('/', addonRouter);
