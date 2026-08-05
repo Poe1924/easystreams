@@ -18,6 +18,8 @@ const PROVIDER_META = {
     raiplay: { display: 'RaiPlay', category: 'Film & Serie ufficiali', accent: '#0066CC', icon: 'tv' }
 };
 
+const PROXY_REQUIRED_PROVIDERS = new Set(['vidxgo', 'mediaset', 'raiplay']);
+
 const ICON_SVG = {
     film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.3.3 2.6 1.4Z"/><path d="M6.2 5.3 16.9 8"/><path d="M3 11h18v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg>',
     tv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>',
@@ -60,8 +62,9 @@ function renderProviderCard(name, disabled) {
     const safeAccent = escapeHtml(meta.accent);
     const iconSvg = ICON_SVG[meta.icon] || ICON_SVG.film;
     const checkedAttr = disabled ? '' : ' checked';
+    const requiresProxy = PROXY_REQUIRED_PROVIDERS.has(String(name || '').toLowerCase());
     return `
-                <label class="provider-card" style="--accent:${safeAccent}" aria-label="${safeDisplay}">
+                <label class="provider-card${requiresProxy ? ' provider-requires-proxy' : ''}" style="--accent:${safeAccent}" aria-label="${safeDisplay}" data-requires-proxy="${requiresProxy ? 'true' : 'false'}">
                     <input type="checkbox" class="provider-checkbox" value="${safeValue}"${checkedAttr}>
                     <span class="provider-card-inner">
                         <span class="provider-icon">${iconSvg}</span>
@@ -69,6 +72,7 @@ function renderProviderCard(name, disabled) {
                             <span class="provider-name">${safeDisplay}</span>
                             <span class="provider-category">${safeCategory}</span>
                         </span>
+                        ${requiresProxy ? '<span class="provider-proxy-warning">Funziona solo con EasyProxy</span>' : ''}
                     </span>
                 </label>`;
 }

@@ -209,6 +209,7 @@
 
         .provider-card-inner {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 14px;
         }
@@ -296,6 +297,33 @@
         .provider-card:focus-within {
             outline: 2px solid var(--netflix-red);
             outline-offset: 2px;
+        }
+
+        .provider-proxy-warning {
+            display: none;
+            position: absolute;
+            inset: 0;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 10px;
+            background: linear-gradient(180deg, transparent 20%, rgba(24, 24, 24, 0.96) 58%);
+            color: #fbbf24;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: center;
+        }
+
+        .provider-card.proxy-missing .provider-proxy-warning {
+            display: flex;
+        }
+
+        .provider-card.proxy-missing {
+            cursor: not-allowed;
+            opacity: 0.55;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -686,6 +714,18 @@
                 .filter((entry) => entry.url);
         }
 
+        function syncProxyRequiredProviders() {
+            const hasProxy = getEasyProxyEntries().length > 0;
+            providerCheckboxes.forEach((input) => {
+                const card = input.closest('.provider-card');
+                if (!card || card.dataset.requiresProxy !== 'true') return;
+                input.disabled = !hasProxy;
+                card.classList.toggle('proxy-missing', !hasProxy);
+                if (hasProxy) input.checked = true;
+                else input.checked = false;
+            });
+        }
+
         function normalizeInitialEasyProxyEntries(config) {
             if (Array.isArray(config.easyProxies)) {
                 return config.easyProxies
@@ -720,6 +760,7 @@
             providerCheckboxes.forEach((input) => {
                 input.checked = !disabledProviders.has(String(input.value || '').toLowerCase());
             });
+            syncProxyRequiredProviders();
         }
 
         function getConfigPath() {
@@ -737,6 +778,7 @@
         }
 
         function updateInstallLinks() {
+            syncProxyRequiredProviders();
             const configPath = getConfigPath();
             manifestUrl = `${protocol}//${currentHost}${configPath}/manifest.json`;
             stremioUrl = `stremio://${currentHost}${configPath}/manifest.json`;
