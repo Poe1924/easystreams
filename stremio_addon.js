@@ -274,8 +274,8 @@ const ENABLE_TMDB_ANIME_DETECTION = true;
 const DEFAULT_DISABLED_PROVIDERS = new Set([]);
 const TMDB_ANIME_DETECTION_TIMEOUT = 1200;
 const TMDB_ANIME_CACHE_TTL = 21600000;
-const ADDON_CACHE_ENABLED = true;
-const STREAM_CACHE_TTL = 60000;
+const ADDON_CACHE_ENABLED = false;
+const STREAM_CACHE_TTL = 15000;
 const STREAM_CACHE_MAX_SIZE = 50000;
 const STREAM_CACHE_MAX_BYTES = 100 * 1024 * 1024;
 const PROVIDER_BENCHMARK_LOGS =
@@ -302,11 +302,29 @@ function cloneStreamResponse(response) {
     };
 }
 
+function hasExpiredStreamUrl(response) {
+    const streams = Array.isArray(response?.streams) ? response.streams : [];
+    const now = Math.floor(Date.now() / 1000);
+    return streams.some((stream) => {
+        try {
+            const expires = Number(new URL(String(stream?.url || '')).searchParams.get('expires'));
+            return Number.isFinite(expires) && expires <= now;
+        } catch (_) {
+            return false;
+        }
+    });
+}
+
 function getCachedStreamResponse(cacheKey) {
     if (!ADDON_CACHE_ENABLED) return null;
     const entry = streamCache.get(cacheKey);
     if (!entry) return null;
     if (entry.expiresAt <= Date.now()) {
+        streamCacheBytes = Math.max(0, streamCacheBytes - (entry.sizeBytes || 0));
+        streamCache.delete(cacheKey);
+        return null;
+    }
+    if (hasExpiredStreamUrl(entry.response)) {
         streamCacheBytes = Math.max(0, streamCacheBytes - (entry.sizeBytes || 0));
         streamCache.delete(cacheKey);
         return null;
