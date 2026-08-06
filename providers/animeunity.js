@@ -7255,6 +7255,11 @@ var require_loadm = __commonJS({
   "src/extractors/loadm.js"(exports2, module2) {
     var CryptoJS = require_crypto_js();
     var { USER_AGENT: USER_AGENT2 } = require_common();
+    var ProxyAgent = null;
+    try {
+      ProxyAgent = require("undici").ProxyAgent;
+    } catch (_) {
+    }
     function extractLoadm(playerUrl, referer = "guardoserie.horse") {
       return __async(this, null, function* () {
         try {
@@ -7266,12 +7271,16 @@ var require_loadm = __commonJS({
           const key = CryptoJS.enc.Utf8.parse("kiemtienmua911ca");
           const iv = CryptoJS.enc.Utf8.parse("1234567890oiuytr");
           const queryParams = `id=${encodeURIComponent(id)}&w=2560&h=1440&r=${encodeURIComponent(referer)}`;
+          const proxyList = String(process.env.ANIMEUNITY_PROXY || "").split(/[\s,;]+/).map((value) => value.trim()).filter((value) => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+          const proxyUrl = proxyList.length > 0 ? proxyList[Math.floor(Math.random() * proxyList.length)] : "";
+          const dispatcher = proxyUrl && ProxyAgent ? new ProxyAgent(proxyUrl) : void 0;
           const response = yield fetch(`${apiUrl}?${queryParams}`, {
             headers: {
               "User-Agent": USER_AGENT2,
               "Referer": baseUrl,
               "X-Requested-With": "XMLHttpRequest"
-            }
+            },
+            dispatcher
           });
           if (!response.ok) {
             const errorBody = yield response.text().catch(() => "");

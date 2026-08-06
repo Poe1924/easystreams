@@ -1,5 +1,7 @@
 const CryptoJS = require('crypto-js');
 const { USER_AGENT } = require('./common');
+let ProxyAgent = null;
+try { ProxyAgent = require('undici').ProxyAgent; } catch (_) {}
 
 /**
  * Extractor for Loadm (loadm.cam)
@@ -20,6 +22,14 @@ async function extractLoadm(playerUrl, referer = 'guardoserie.horse') {
         const iv = CryptoJS.enc.Utf8.parse('1234567890oiuytr');
 
         const queryParams = `id=${encodeURIComponent(id)}&w=2560&h=1440&r=${encodeURIComponent(referer)}`;
+        const proxyList = String(process.env.ANIMEUNITY_PROXY || '')
+            .split(/[\s,;]+/)
+            .map(value => value.trim())
+            .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+        const proxyUrl = proxyList.length > 0
+            ? proxyList[Math.floor(Math.random() * proxyList.length)]
+            : '';
+        const dispatcher = proxyUrl && ProxyAgent ? new ProxyAgent(proxyUrl) : undefined;
 
         // Loadm extraction must run direct (no worker/proxy), otherwise provider-side
         // anti-bot checks may reject the request path.
@@ -28,7 +38,8 @@ async function extractLoadm(playerUrl, referer = 'guardoserie.horse') {
                 'User-Agent': USER_AGENT,
                 'Referer': baseUrl,
                 'X-Requested-With': 'XMLHttpRequest'
-            }
+            },
+            dispatcher
         });
 
         if (!response.ok) {
