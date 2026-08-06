@@ -714,16 +714,19 @@
                 .filter((entry) => entry.url);
         }
 
+        let proxyStateInitialized = false;
+        let previousHasProxy = false;
         function syncProxyRequiredProviders() {
             const hasProxy = getEasyProxyEntries().length > 0;
             providerCheckboxes.forEach((input) => {
                 const card = input.closest('.provider-card');
                 if (!card || card.dataset.requiresProxy !== 'true') return;
-                input.disabled = !hasProxy;
+                input.disabled = false;
                 card.classList.toggle('proxy-missing', !hasProxy);
-                if (hasProxy) input.checked = true;
-                else input.checked = false;
+                if (hasProxy && proxyStateInitialized && !previousHasProxy) input.checked = true;
             });
+            previousHasProxy = hasProxy;
+            proxyStateInitialized = true;
         }
 
         function normalizeInitialEasyProxyEntries(config) {
