@@ -1535,7 +1535,7 @@ const providers = {
     streamingcommunity: require('./src/streamingcommunity/index.js'),
     mediaset: require('./src/mediaset/index.js'),
     raiplay: require('./src/raiplay/index.js'),
-    partite: require('./src/partite/index.js'),
+    pcc: require('./src/pcc/index.js'),
 
 };
 
@@ -1602,23 +1602,23 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
         } else if (isImdbRequest) {
             plan = likelyAnime
                 ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie']
-                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
+                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_MOVIES) {
             plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie'];
         } else {
-            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
+            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc'];
         }
     } else if (normalizedType === 'anime') {
-        plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite'];
+        plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc'];
     } else {
         if (isImdbRequest) {
             plan = likelyAnime
-                ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite']
-                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
+                ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc']
+                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_SERIES) {
-            plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'partite'];
+            plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc'];
         } else {
-            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'partite'];
+            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc'];
         }
     }
 
