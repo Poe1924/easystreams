@@ -8606,13 +8606,7 @@ if (!IS_SERVER) {
       if (!isSessionValid) {
         console.log(`[Guardoserie] Sessione CF mancante o scaduta, salto provider e avvio bypass in background`);
         const { getClearance } = require_cf_bypass();
-        getClearance(getGuardoserieBaseUrl(), "guardoserie", {
-          waitUntil: "network_idle"
-        }).then(() => {
-          console.log(`[Guardoserie] Sessione CF creata/aggiornata con successo in background!`);
-        }).catch((e) => {
-          console.error(`[Guardoserie] Errore bypass in background:`, e.message);
-        });
+        getClearance(getGuardoserieBaseUrl(), "guardoserie", { waitUntil: "network_idle" }).then(() => console.log(`[Guardoserie] Sessione CF creata/aggiornata con successo in background!`)).catch((e) => console.error(`[Guardoserie] Errore bypass in background:`, e.message));
         return [];
       }
       try {
