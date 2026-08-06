@@ -52,6 +52,15 @@ async function getStreams(id, type, season, episode) {
   if (mappedEpisode > 0) e = mappedEpisode;
   const finalImdbId = resolved.imdbId;
   const movie = String(type).toLowerCase() === 'movie';
+  let mediaTitle = 'Server';
+  try {
+    const r = await fetch(`https://api.themoviedb.org/3/find/${finalImdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`);
+    if (r.ok) {
+      const data = await r.json();
+      const item = (movie ? data.movie_results : data.tv_results)?.[0];
+      mediaTitle = item?.title || item?.name || mediaTitle;
+    }
+  } catch (_) {}
   const streams = [];
   for (const server of [1, 2, 3, 4, 5]) {
     const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
@@ -65,7 +74,7 @@ async function getStreams(id, type, season, episode) {
         const quality = height >= 2160 ? '4K' : height >= 1440 ? '1440p' : height >= 1080 ? '1080p' : height >= 720 ? '720p' : height ? `${height}p` : 'Unknown';
         const hasItalianAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO[^\r\n]*(?:LANGUAGE="(?:it|ita)"|NAME="(?:Italian|Italiano))/i.test(text);
         const hasAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text);
-        if (hasAudio) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? 'Partite.cc' : `Partite.cc ${s}x${e}`, quality, language: hasItalianAudio ? 'Italian' : '', type: 'hls', url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, 'Partite.cc'));
+        if (hasAudio) streams.push(formatStream({ name: `Server ${server}`, title: movie ? mediaTitle : `${mediaTitle} ${s}x${e}`, quality, language: hasItalianAudio ? 'Italian' : '', type: 'hls', url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, 'Partite.cc'));
       }
     } catch (_) {}
   }

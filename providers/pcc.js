@@ -176,7 +176,7 @@ var require_formatter = __commonJS({
   }
 });
 
-// src/partite/index.js
+// src/pcc/index.js
 var { formatStream } = require_formatter();
 var BASE_URL = "https://www.partite.cc";
 var TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
@@ -221,6 +221,7 @@ function resolveImdbId(id, type, season, episode) {
 }
 function getStreams(id, type, season, episode) {
   return __async(this, null, function* () {
+    var _a;
     const animeEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+)$/i);
     const animeSeasonEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
     let s = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[1]) || season, 10) || 1;
@@ -234,6 +235,16 @@ function getStreams(id, type, season, episode) {
     if (mappedEpisode > 0) e = mappedEpisode;
     const finalImdbId = resolved.imdbId;
     const movie = String(type).toLowerCase() === "movie";
+    let mediaTitle = "Server";
+    try {
+      const r = yield fetch(`https://api.themoviedb.org/3/find/${finalImdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`);
+      if (r.ok) {
+        const data = yield r.json();
+        const item = (_a = movie ? data.movie_results : data.tv_results) == null ? void 0 : _a[0];
+        mediaTitle = (item == null ? void 0 : item.title) || (item == null ? void 0 : item.name) || mediaTitle;
+      }
+    } catch (_) {
+    }
     const streams = [];
     for (const server of [1, 2, 3, 4, 5]) {
       const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
@@ -247,7 +258,7 @@ function getStreams(id, type, season, episode) {
           const quality = height >= 2160 ? "4K" : height >= 1440 ? "1440p" : height >= 1080 ? "1080p" : height >= 720 ? "720p" : height ? `${height}p` : "Unknown";
           const hasItalianAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO[^\r\n]*(?:LANGUAGE="(?:it|ita)"|NAME="(?:Italian|Italiano))/i.test(text);
           const hasAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text);
-          if (hasAudio) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? "Partite.cc" : `Partite.cc ${s}x${e}`, quality, language: hasItalianAudio ? "Italian" : "", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
+          if (hasAudio) streams.push(formatStream({ name: `Server ${server}`, title: movie ? mediaTitle : `${mediaTitle} ${s}x${e}`, quality, language: hasItalianAudio ? "Italian" : "", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
         }
       } catch (_) {
       }

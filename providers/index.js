@@ -13007,9 +13007,9 @@ var require_altadefinizionestreaming = __commonJS({
   }
 });
 
-// src/partite/index.js
-var require_partite = __commonJS({
-  "src/partite/index.js"(exports2, module2) {
+// src/pcc/index.js
+var require_pcc = __commonJS({
+  "src/pcc/index.js"(exports2, module2) {
     var { formatStream } = require_formatter();
     var BASE_URL = "https://www.partite.cc";
     var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
@@ -13054,6 +13054,7 @@ var require_partite = __commonJS({
     }
     function getStreams2(id, type, season, episode) {
       return __async(this, null, function* () {
+        var _a;
         const animeEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+)$/i);
         const animeSeasonEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
         let s = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[1]) || season, 10) || 1;
@@ -13067,6 +13068,16 @@ var require_partite = __commonJS({
         if (mappedEpisode > 0) e = mappedEpisode;
         const finalImdbId = resolved.imdbId;
         const movie = String(type).toLowerCase() === "movie";
+        let mediaTitle = "Server";
+        try {
+          const r = yield fetch(`https://api.themoviedb.org/3/find/${finalImdbId}?api_key=${TMDB_API_KEY2}&external_source=imdb_id`);
+          if (r.ok) {
+            const data = yield r.json();
+            const item = (_a = movie ? data.movie_results : data.tv_results) == null ? void 0 : _a[0];
+            mediaTitle = (item == null ? void 0 : item.title) || (item == null ? void 0 : item.name) || mediaTitle;
+          }
+        } catch (_) {
+        }
         const streams = [];
         for (const server of [1, 2, 3, 4, 5]) {
           const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
@@ -13080,7 +13091,7 @@ var require_partite = __commonJS({
               const quality = height >= 2160 ? "4K" : height >= 1440 ? "1440p" : height >= 1080 ? "1080p" : height >= 720 ? "720p" : height ? `${height}p` : "Unknown";
               const hasItalianAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO[^\r\n]*(?:LANGUAGE="(?:it|ita)"|NAME="(?:Italian|Italiano))/i.test(text);
               const hasAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text);
-              if (hasAudio) streams.push(formatStream({ name: `Partite.cc Server ${server}`, title: movie ? "Partite.cc" : `Partite.cc ${s}x${e}`, quality, language: hasItalianAudio ? "Italian" : "", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
+              if (hasAudio) streams.push(formatStream({ name: `Server ${server}`, title: movie ? mediaTitle : `${mediaTitle} ${s}x${e}`, quality, language: hasItalianAudio ? "Italian" : "", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
             }
           } catch (_) {
           }
@@ -13100,7 +13111,7 @@ var animeworld = require_animeworld();
 var animesaturn = require_animesaturn();
 var vidxgo = require_vidxgo2();
 var altadefinizionestreaming = require_altadefinizionestreaming();
-var partite = require_partite();
+var pcc = require_pcc();
 var { createTimeoutSignal } = require_fetch_helper();
 var TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 var CONTEXT_TIMEOUT = 3e3;
@@ -13280,18 +13291,18 @@ function getStreams(id, type, season, episode) {
       if (likelyAnime || isAnimeProviderRequest) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
       } else {
-        selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
+        selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc");
       }
     } else if (normalizedType === "anime") {
-      selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo", "partite");
+      selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo", "pcc");
     } else if (normalizedType === "tv" || normalizedType === "series") {
       if (likelyAnime) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
       } else {
         if (isImdbRequest) {
-          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
+          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc");
         } else {
-          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "partite");
+          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc");
         }
       }
     } else {
@@ -13334,9 +13345,9 @@ function getStreams(id, type, season, episode) {
         );
         continue;
       }
-      if (providerName === "partite") {
+      if (providerName === "pcc") {
         promises.push(
-          partite.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext).then((s) => ({ provider: "Partite.cc", streams: s, status: "fulfilled" })).catch((e) => ({ provider: "Partite.cc", error: e, status: "rejected" }))
+          pcc.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext).then((s) => ({ provider: "Partite.cc", streams: s, status: "fulfilled" })).catch((e) => ({ provider: "Partite.cc", error: e, status: "rejected" }))
         );
         continue;
       }
