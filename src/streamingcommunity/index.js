@@ -14,7 +14,7 @@ try {
     ProxyAgent = null;
 }
 
-const SC_BASE = 'https://streamingcommunityz.team';
+const SC_BASE = 'https://streamingcommunityz.systems';
 let _sitemapCache = null;
 let _sitemapPromise = null;
 
