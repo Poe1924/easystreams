@@ -13014,39 +13014,95 @@ var require_pcc = __commonJS({
     var BASE_URL = "https://www.partite.cc";
     var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
     var MAPPING_URL = "https://animemapping.realbestia.com";
+    var siteEpisodeCache = /* @__PURE__ */ new Map();
+    var SITE_CACHE_TTL = 10 * 60 * 1e3;
     function imdb(value) {
       const match = String(value || "").match(/tt\d+/i);
       return match ? match[0] : null;
     }
-    function resolveImdbId(id, type, season, episode) {
+    function parsePositiveInt(value) {
+      const n = Number.parseInt(String(value != null ? value : ""), 10);
+      return Number.isInteger(n) && n > 0 ? n : null;
+    }
+    function fetchAnimeMapping(provider, externalId, season, episode) {
       return __async(this, null, function* () {
         var _a, _b, _c;
+        try {
+          const query = new URLSearchParams({ ep: String(episode || 1), lang: "it" });
+          if (season != null && Number.parseInt(season, 10) > 0) query.set("s", String(season));
+          const r = yield fetch(`${MAPPING_URL}/${provider}/${externalId}?${query}`);
+          if (!r.ok) return null;
+          const payload = yield r.json();
+          const tmdbEp = ((_a = payload == null ? void 0 : payload.mappings) == null ? void 0 : _a.tmdb_episode) || (payload == null ? void 0 : payload.tmdb_episode);
+          return {
+            imdbId: imdb((_c = (_b = payload == null ? void 0 : payload.mappings) == null ? void 0 : _b.ids) == null ? void 0 : _c.imdb),
+            season: parsePositiveInt(tmdbEp == null ? void 0 : tmdbEp.season),
+            episode: parsePositiveInt(tmdbEp == null ? void 0 : tmdbEp.episode),
+            rawEpisodeNumber: parsePositiveInt(tmdbEp == null ? void 0 : tmdbEp.rawEpisodeNumber)
+          };
+        } catch (_) {
+          return null;
+        }
+      });
+    }
+    function getSiteEpisodeList(imdbId) {
+      return __async(this, null, function* () {
+        const cached = siteEpisodeCache.get(imdbId);
+        if (cached && Date.now() - cached.at < SITE_CACHE_TTL) return cached.list;
+        try {
+          const r = yield fetch(`${BASE_URL}/serie-tv/${imdbId}`);
+          if (!r.ok) return null;
+          const html = yield r.text();
+          const list = [];
+          const regex = /\/hls\/s(\d+)\/serial\/[^/]+\/(\d+)\/(\d+)\/playlist\.m3u8/g;
+          let m;
+          while ((m = regex.exec(html)) !== null) {
+            list.push({ server: Number(m[1]), season: Number(m[2]), episode: Number(m[3]) });
+          }
+          siteEpisodeCache.set(imdbId, { at: Date.now(), list });
+          return list.length ? list : null;
+        } catch (_) {
+          return null;
+        }
+      });
+    }
+    function resolveImdbId(id, type, season, episode) {
+      return __async(this, null, function* () {
         const raw = String(id || "").trim();
         const direct = imdb(raw);
-        if (direct) return direct;
-        const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?(?::(\d+))?$/i);
-        if (anime) {
+        const movie = String(type || "").toLowerCase() === "movie";
+        if (movie) {
+          if (direct) return { imdbId: direct };
+          const match2 = raw.match(/^tmdb:(\d+)$/i) || raw.match(/^(\d+)$/);
+          if (!match2) return null;
           try {
-            const s = anime[4] ? anime[3] : null;
-            const ep = anime[4] || anime[3] || episode || 1;
-            const query = new URLSearchParams({ ep: String(ep), lang: "it" });
-            if (s) query.set("s", s);
-            const r = yield fetch(`${MAPPING_URL}/${anime[1].toLowerCase()}/${anime[2]}?${query}`);
-            if (r.ok) {
-              const payload = yield r.json();
-              const ep2 = ((_a = payload == null ? void 0 : payload.mappings) == null ? void 0 : _a.tmdb_episode) || (payload == null ? void 0 : payload.tmdb_episode);
-              return { imdbId: imdb((_c = (_b = payload == null ? void 0 : payload.mappings) == null ? void 0 : _b.ids) == null ? void 0 : _c.imdb), season: ep2 == null ? void 0 : ep2.season, episode: ep2 == null ? void 0 : ep2.episode };
-            }
+            const r = yield fetch(`https://api.themoviedb.org/3/movie/${match2[1]}/external_ids?api_key=${TMDB_API_KEY2}`);
+            return r.ok ? { imdbId: imdb((yield r.json()).imdb_id) } : null;
           } catch (_) {
+            return null;
           }
-          return null;
+        }
+        const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?$/i);
+        if (anime) {
+          const ep = anime[3] || episode || 1;
+          const mapped = yield fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, 1);
+          if (!(mapped == null ? void 0 : mapped.imdbId)) return null;
+          return __spreadProps(__spreadValues({}, mapped), { rawEpisodeNumber: ep });
+        }
+        if (direct) {
+          const mapped = yield fetchAnimeMapping("imdb", direct, season, episode);
+          if ((mapped == null ? void 0 : mapped.imdbId) && mapped.rawEpisodeNumber) return mapped;
+          return { imdbId: direct, season: parsePositiveInt(season), episode: parsePositiveInt(episode) };
         }
         const match = raw.match(/^tmdb:(\d+)$/i) || raw.match(/^(\d+)$/);
         if (!match) return null;
         try {
-          const endpoint = String(type).toLowerCase() === "movie" ? "movie" : "tv";
-          const r = yield fetch(`https://api.themoviedb.org/3/${endpoint}/${match[1]}/external_ids?api_key=${TMDB_API_KEY2}`);
-          return r.ok ? imdb((yield r.json()).imdb_id) : null;
+          const r = yield fetch(`https://api.themoviedb.org/3/tv/${match[1]}/external_ids?api_key=${TMDB_API_KEY2}`);
+          const imdbId = r.ok ? imdb((yield r.json()).imdb_id) : null;
+          if (!imdbId) return null;
+          const mapped = yield fetchAnimeMapping("imdb", imdbId, season, episode);
+          if ((mapped == null ? void 0 : mapped.imdbId) && mapped.rawEpisodeNumber) return mapped;
+          return { imdbId, season: parsePositiveInt(season), episode: parsePositiveInt(episode) };
         } catch (_) {
           return null;
         }
@@ -13056,18 +13112,31 @@ var require_pcc = __commonJS({
       return __async(this, null, function* () {
         var _a;
         const animeEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+)$/i);
-        const animeSeasonEpisode = String(id || "").match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+):(\d+)$/i);
-        let s = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[1]) || season, 10) || 1;
-        let e = Number.parseInt((animeSeasonEpisode == null ? void 0 : animeSeasonEpisode[2]) || (animeEpisode == null ? void 0 : animeEpisode[1]) || episode, 10) || 1;
-        const imdbId = yield resolveImdbId(id, type, s, e);
-        const resolved = typeof imdbId === "string" ? { imdbId } : imdbId;
-        if (!(resolved == null ? void 0 : resolved.imdbId)) return [];
-        const mappedSeason = Number.parseInt(resolved.season, 10);
-        const mappedEpisode = Number.parseInt(resolved.episode, 10);
-        if (mappedSeason > 0) s = mappedSeason;
-        if (mappedEpisode > 0) e = mappedEpisode;
-        const finalImdbId = resolved.imdbId;
-        const movie = String(type).toLowerCase() === "movie";
+        let s = Number.parseInt(season, 10) || 1;
+        let e = Number.parseInt((animeEpisode == null ? void 0 : animeEpisode[1]) || episode, 10) || 1;
+        const resolved = yield resolveImdbId(id, type, s, e);
+        const info = typeof resolved === "string" ? { imdbId: resolved } : resolved;
+        if (!(info == null ? void 0 : info.imdbId)) return [];
+        const finalImdbId = info.imdbId;
+        const movie = String(type || "").toLowerCase() === "movie";
+        let siteSeason = null;
+        let siteEpisode = null;
+        let preferredServer = null;
+        if (!movie && info.rawEpisodeNumber) {
+          const list = yield getSiteEpisodeList(finalImdbId);
+          const target = list == null ? void 0 : list[info.rawEpisodeNumber - 1];
+          if (target) {
+            siteSeason = target.season;
+            siteEpisode = target.episode;
+            preferredServer = target.server;
+          }
+        }
+        if (siteSeason == null) {
+          const ms = parsePositiveInt(info.season);
+          const me = parsePositiveInt(info.episode);
+          siteSeason = ms != null ? ms : s;
+          siteEpisode = me != null ? me : e;
+        }
         let mediaTitle = "Server";
         try {
           const r = yield fetch(`https://api.themoviedb.org/3/find/${finalImdbId}?api_key=${TMDB_API_KEY2}&external_source=imdb_id`);
@@ -13078,9 +13147,12 @@ var require_pcc = __commonJS({
           }
         } catch (_) {
         }
+        const servers = [];
+        if (preferredServer) servers.push(preferredServer);
+        for (const server of [1, 2, 3, 4, 5]) if (!servers.includes(server)) servers.push(server);
         const streams = [];
-        for (const server of [1, 2, 3, 4, 5]) {
-          const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${s}/${e}`;
+        for (const server of servers) {
+          const path = movie ? `/hls/s${server}/movie/${finalImdbId}` : `/hls/s${server}/serial/${finalImdbId}/${siteSeason}/${siteEpisode}`;
           const url = `${BASE_URL}${path}/playlist.m3u8`;
           try {
             const r = yield fetch(url, { headers: { Referer: `${BASE_URL}/` } });
@@ -13091,7 +13163,7 @@ var require_pcc = __commonJS({
               const quality = height >= 2160 ? "4K" : height >= 1440 ? "1440p" : height >= 1080 ? "1080p" : height >= 720 ? "720p" : height ? `${height}p` : "Unknown";
               const hasItalianAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO[^\r\n]*(?:LANGUAGE="(?:it|ita)"|NAME="(?:Italian|Italiano))/i.test(text);
               const hasAudio = /#EXT-X-MEDIA:[^\r\n]*TYPE=AUDIO/i.test(text);
-              if (hasAudio) streams.push(formatStream({ name: `Server ${server}`, title: movie ? mediaTitle : `${mediaTitle} ${s}x${e}`, quality, language: hasItalianAudio ? "Italian" : "", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
+              if (hasAudio) streams.push(formatStream({ name: `Server ${server}`, title: movie ? mediaTitle : `${mediaTitle} ${siteSeason}x${siteEpisode}`, quality, language: hasItalianAudio ? "Italian" : "", type: "hls", url, behaviorHints: { notWebReady: true, proxyHeaders: { request: { Referer: `${BASE_URL}/` } } } }, "Partite.cc"));
             }
           } catch (_) {
           }
