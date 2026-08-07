@@ -155,6 +155,24 @@ if (!IS_SERVER) {
         return null;
     }
 
+    function extractSiteEpisodeListFromSeriesPage(pageHtml) {
+        if (!pageHtml) return [];
+        const regex = /href=["']([^"']*\/episodio\/[^"']*-stagione-(\d+)-episodio-(\d+)[^"']*)["']/gi;
+        const list = [];
+        let m;
+        while ((m = regex.exec(pageHtml)) !== null) {
+            list.push({ url: m[1], season: Number(m[2]), episode: Number(m[3]) });
+        }
+        return list;
+    }
+
+    function extractEpisodeUrlByRawNumber(pageHtml, rawEpisodeNumber) {
+        if (!pageHtml || !Number.isInteger(rawEpisodeNumber) || rawEpisodeNumber < 1) return null;
+        const list = extractSiteEpisodeListFromSeriesPage(pageHtml);
+        const target = list[rawEpisodeNumber - 1];
+        return target ? target.url : null;
+    }
+
     function normalizePlayerLink(link) {
         if (!link) return null;
         let normalized = String(link)
@@ -436,25 +454,21 @@ if (!IS_SERVER) {
             const contextMalId = providerContext && /^\d+$/.test(String(providerContext.malId || '')) ? String(providerContext.malId) : null;
             const contextAnilistId = providerContext && /^\d+$/.test(String(providerContext.anilistId || '')) ? String(providerContext.anilistId) : null;
             const contextAnidbId = providerContext && /^\d+$/.test(String(providerContext.anidbId || '')) ? String(providerContext.anidbId) : null;
+            let rawEpisodeNumber = null;
             const animeMatch = id.toString().match(/^(kitsu|mal|anilist|anidb):(\d+)/i);
+            const animeEpisodeFromId = id.toString().match(/^(?:kitsu|mal|anilist|anidb):\d+:(\d+)$/i);
             const animeProvider = animeMatch ? animeMatch[1].toLowerCase() : (contextKitsuId ? 'kitsu' : (contextMalId ? 'mal' : (contextAnilistId ? 'anilist' : (contextAnidbId ? 'anidb' : null))));
             const animeExtId = animeMatch ? animeMatch[2] : (contextKitsuId || contextMalId || contextAnilistId || contextAnidbId);
 
             if (animeProvider && animeExtId) {
-                const seasonHintForAnime = shouldIncludeSeasonHintForKitsu ? season : null;
-                const mapped = await getIdsFromAnimeProvider(animeProvider, animeExtId, seasonHintForAnime, episode, providerContext);
+                // I provider anime usano episodi assoluti, niente stagioni.
+                rawEpisodeNumber = Number.parseInt(animeEpisodeFromId?.[1] || episode || '', 10);
+                if (!Number.isInteger(rawEpisodeNumber) || rawEpisodeNumber < 1) rawEpisodeNumber = null;
+                const mapped = await getIdsFromAnimeProvider(animeProvider, animeExtId, null, 1, providerContext);
                 mark('kitsu_mapping_done', { ok: Boolean(mapped && mapped.tmdbId) });
                 if (mapped && mapped.tmdbId) {
                     tmdbId = mapped.tmdbId;
-                    console.log(`[Guardoserie] ${animeProvider} ${animeExtId} mapped to TMDB ID ${tmdbId}`);
-                    if (mapped.mappedSeason && mapped.mappedEpisode) {
-                        effectiveSeason = mapped.mappedSeason;
-                        effectiveEpisode = mapped.mappedEpisode;
-                        console.log(`[Guardoserie] Using TMDB episode mapping ${effectiveSeason}x${effectiveEpisode} (raw=${mapped.rawEpisodeNumber || 'n/a'})`);
-                    } else if (mapped.rawEpisodeNumber) {
-                        effectiveEpisode = mapped.rawEpisodeNumber;
-                        console.log(`[Guardoserie] Using mapped raw episode number ${effectiveEpisode}`);
-                    }
+                    console.log(`[Guardoserie] ${animeProvider} ${animeExtId} mapped to TMDB ID ${tmdbId} (abs ep=${rawEpisodeNumber || 'n/a'})`);
                 } else {
                     console.log(`[Guardoserie] No ${animeProvider}->TMDB mapping found for ${animeExtId}`);
                 }
@@ -473,8 +487,20 @@ if (!IS_SERVER) {
                         else if ((type === 'series' || type === 'tv') && data.tv_results?.length > 0) tmdbId = data.tv_results[0].id;
                     }
                 }
+                // Per anime richiesti via imdb: cerca il raw episode number da animemapping.
+                const mapped = await getIdsFromAnimeProvider('imdb', id, season, episode, providerContext);
+                if (mapped && mapped.rawEpisodeNumber) {
+                    rawEpisodeNumber = mapped.rawEpisodeNumber;
+                    console.log(`[Guardoserie] imdb ${id} mapped to raw episode ${rawEpisodeNumber}`);
+                }
             } else if (id.toString().startsWith('tmdb:')) {
                 tmdbId = id.toString().replace('tmdb:', '');
+                // Per anime richiesti via tmdb: cerca il raw episode number da animemapping.
+                const mapped = await getIdsFromAnimeProvider('tmdb', tmdbId, season, episode, providerContext);
+                if (mapped && mapped.rawEpisodeNumber) {
+                    rawEpisodeNumber = mapped.rawEpisodeNumber;
+                    console.log(`[Guardoserie] tmdb ${tmdbId} mapped to raw episode ${rawEpisodeNumber}`);
+                }
             }
 
             const showInfo = await getShowInfo(tmdbId, type === 'movie' ? 'movie' : 'tv');
@@ -535,6 +561,32 @@ if (!IS_SERVER) {
             }
 
             mark('search_done', { queries: allQueries.length, results: allResults.length });
+
+            // Fallback: ricerca WordPress classica /?s= quando AJAX fallisce (403 CF, ecc.)
+            if (allResults.length === 0 && allQueries.length > 0) {
+                for (const query of allQueries.slice(0, 3)) {
+                    try {
+                        const wpUrl = `${baseUrl}/?s=${encodeURIComponent(query)}`;
+                        const wpHtml = await smartFetch(wpUrl, baseUrl, {
+                            headers: {
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                                'Referer': `${baseUrl}/`
+                            },
+                            provider: 'guardoserie'
+                        });
+                        const wpResults = extractSearchResultsFromHtml(wpHtml, baseUrl);
+                        if (wpResults.length > 0) {
+                            allResults = wpResults;
+                            console.log(`[Guardoserie] WP search fallback trovato ${wpResults.length} risultati per "${query}"`);
+                            break;
+                        }
+                    } catch (e) {
+                        console.log(`[Guardoserie] WP search fallback fallito per "${query}":`, e.message);
+                    }
+                }
+            }
+
+            mark('search_fallback_done', { results: allResults.length });
 
             if (allResults.length === 0) {
                 console.log(`[Guardoserie] Nessun risultato per ${title}`);
@@ -603,6 +655,8 @@ if (!IS_SERVER) {
                             targetUrl = result.url;
                             break;
                         }
+                        // Anno nella pagina in conflitto con quello richiesto: risultato sbagliato.
+                        continue;
                     }
 
                     if (matchScore >= 2) {
@@ -618,7 +672,7 @@ if (!IS_SERVER) {
             }
 
             if (targetUrl) {
-                return await processTargetUrl(targetUrl, type, effectiveSeason, effectiveEpisode, baseUrl, title, id, benchStart, mark);
+                return await processTargetUrl(targetUrl, type, effectiveSeason, effectiveEpisode, baseUrl, title, id, benchStart, mark, rawEpisodeNumber);
             }
 
             console.log(`[Guardoserie] No matching result found for ${title}`);
@@ -629,17 +683,27 @@ if (!IS_SERVER) {
         }
     }
 
-    async function processTargetUrl(targetUrl, type, effectiveSeason, effectiveEpisode, baseUrl, title, id, benchStart, mark) {
+    async function processTargetUrl(targetUrl, type, effectiveSeason, effectiveEpisode, baseUrl, title, id, benchStart, mark, rawEpisodeNumber = null) {
         let episodeUrl = targetUrl;
+        let seriesPageHtml = null;
         if (type === 'tv' || type === 'series') {
-            const pageHtml = await smartFetch(targetUrl, getGuardoserieBaseUrl(), {
+            seriesPageHtml = await smartFetch(targetUrl, getGuardoserieBaseUrl(), {
                 headers: {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Referer': `${getGuardoserieBaseUrl()}/`
                 },
                 provider: 'guardoserie'
             });
-            const resolvedEpisodeUrl = extractEpisodeUrlFromSeriesPage(pageHtml, effectiveSeason, effectiveEpisode);
+            let resolvedEpisodeUrl = null;
+            if (rawEpisodeNumber) {
+                resolvedEpisodeUrl = extractEpisodeUrlByRawNumber(seriesPageHtml, rawEpisodeNumber);
+                if (resolvedEpisodeUrl) {
+                    console.log(`[Guardoserie] Using raw episode number ${rawEpisodeNumber} -> ${resolvedEpisodeUrl}`);
+                }
+            }
+            if (!resolvedEpisodeUrl) {
+                resolvedEpisodeUrl = extractEpisodeUrlFromSeriesPage(seriesPageHtml, effectiveSeason, effectiveEpisode);
+            }
             if (resolvedEpisodeUrl) {
                 episodeUrl = resolvedEpisodeUrl;
             } else {
@@ -664,7 +728,17 @@ if (!IS_SERVER) {
         }
 
         console.log(`[Guardoserie] Found ${playerLinks.length} player links`);
-        const displayName = (type === 'tv' || type === 'series') ? `${title} ${effectiveSeason}x${effectiveEpisode}` : title;
+        let displaySeason = effectiveSeason;
+        let displayEpisode = effectiveEpisode;
+        const siteList = extractSiteEpisodeListFromSeriesPage(seriesPageHtml);
+        if (rawEpisodeNumber && siteList.length > 0) {
+            const target = siteList[rawEpisodeNumber - 1];
+            if (target) {
+                displaySeason = target.season;
+                displayEpisode = target.episode;
+            }
+        }
+        const displayName = (type === 'tv' || type === 'series') ? `${title} ${displaySeason}x${displayEpisode}` : title;
 
         const streamPromises = playerLinks.map(async (playerLink) => {
             try {
