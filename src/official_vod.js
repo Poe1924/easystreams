@@ -80,6 +80,16 @@ function parseYear(value) {
   return match ? Number(match[0]) : null;
 }
 
+function parseMediasetYear(entry) {
+  const explicit = entry['mediasetprogram$productionYear'];
+  if (explicit) return parseYear(explicit);
+  const description = String(entry.description || entry['mediasetprogram$description'] || '');
+  const leading = description.match(/^(?:[A-ZÀ-Ü' ]{2,},\s*)?((?:19|20)\d{2})/);
+  if (leading) return Number(leading[1]);
+  if (entry.year) return parseYear(entry.year);
+  return parseYear(entry.pubDate || entry.updated);
+}
+
 function cleanTitle(value) {
   return String(value || '')
     .replace(/\s*\((?:IT|Italy|Italia)\)\s*$/i, '')
@@ -291,13 +301,27 @@ function walk(value, visit) {
   }
 }
 
+function candidateDetail(candidate) {
+  return (candidate.isFullEpisode ? 4 : 0)
+    + (candidate.seriesTitle ? 2 : 0)
+    + (candidate.season != null ? 2 : 0)
+    + (candidate.episode != null ? 2 : 0)
+    + (candidate.year ? 1 : 0);
+}
+
 function deduplicate(items) {
   const map = new Map();
   for (const item of items) {
     const key = item && (item.guid || item.contentId || item.pageUrl);
     if (!key) continue;
     const current = map.get(key);
-    if (!current || String(item.title || '').length > String(current.title || '').length) map.set(key, item);
+    const detail = candidateDetail(item);
+    const currentDetail = current ? candidateDetail(current) : -1;
+    if (
+      !current
+      || detail > currentDetail
+      || (detail === currentDetail && String(item.title || '').length > String(current.title || '').length)
+    ) map.set(key, item);
   }
   return [...map.values()];
 }
@@ -618,7 +642,7 @@ function normalizeMediasetEntry(entry) {
     title,
     seriesTitle,
     episodeTitle: /episode|videoitem/i.test(kind) || entry.tvSeasonEpisodeNumber != null ? title : '',
-    year: parseYear(entry.year || entry['mediasetprogram$productionYear'] || entry.pubDate || entry.updated),
+    year: parseMediasetYear(entry),
     season: positiveInt(entry.tvSeasonNumber || entry.seasonNumber || entry['mediasetprogram$seasonNumber']),
     episode: positiveInt(entry.tvSeasonEpisodeNumber || entry.episodeNumber || entry['mediasetprogram$episodeNumber']),
     isClip: /clip|promo|trailer|backstage/i.test(`${kind} ${entry['mediasetprogram$category'] || ''} ${title}`) || (duration > 0 && duration < 600),
@@ -639,7 +663,14 @@ async function expandMediasetSeries(item, target) {
   seriesUrl.searchParams.set('byGuid', seriesGuid);
   const series = (await fetchJson(seriesUrl)).entries?.[0];
   if (!series) return [];
-  const season = (series.seriesTvSeasons || []).find((value) => Number(value.tvSeasonNumber) === Number(target.season));
+  const seasons = series.seriesTvSeasons || [];
+  const currentSeasonId = series.mediasetprogram$currentSeason
+    && (series.mediasetprogram$currentSeason.default || series.mediasetprogram$currentSeason);
+  const currentSeason = seasons.find((value) => value.guid === currentSeasonId || String(value.id || '').endsWith(`/${currentSeasonId}`));
+  const seasonYears = seasons.map((value) => value.startYear && Number(value.startYear)).filter(Boolean);
+  const seriesYear = (currentSeason && currentSeason.startYear)
+    || (seasonYears.length ? Math.min(...seasonYears) : null);
+  const season = seasons.find((value) => Number(value.tvSeasonNumber) === Number(target.season));
   if (!season) return [];
   const seasonId = season.id || season.url || (series.availableTvSeasonIds || []).find((value) => String(value).endsWith(`/${season.guid}`));
   if (!seasonId) return [];
@@ -651,6 +682,7 @@ async function expandMediasetSeries(item, target) {
   return episodes.map((entry) => normalizeMediasetEntry({
     ...entry,
     seriesTitle: series.title || item.cardTitle || '',
+    year: parseMediasetYear(entry) || seriesYear,
     tvSeasonNumber: entry.tvSeasonNumber == null ? season.tvSeasonNumber : entry.tvSeasonNumber
   })).filter((candidate) => candidate.guid);
 }
