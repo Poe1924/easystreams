@@ -785,6 +785,19 @@ function isStrongWittyEpisode(candidate, target) {
 
 async function enrichWittyBase(base) {
   const html = await fetchText(base.pageUrl, { headers: { referer: `${WITTY_ORIGIN}/`, accept: 'text/html' } });
+  const canonicalValue = decodeHtml(
+    html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)/i)?.[1]
+      || html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)/i)?.[1]
+      || base.pageUrl
+  );
+  let pageUrl;
+  try {
+    const canonicalUrl = new URL(canonicalValue, WITTY_ORIGIN);
+    if (!canonicalUrl.hostname.endsWith('wittytv.it')) return null;
+    pageUrl = canonicalUrl.href;
+  } catch {
+    return null;
+  }
   const guid = html.match(/guIDcurrentGlobal\s*=\s*["'](F[A-Z0-9]{15})["']/i)?.[1]
     || html.match(/\b(F[A-Z0-9]{15})\b/i)?.[1];
   if (!guid) return null;
@@ -795,14 +808,14 @@ async function enrichWittyBase(base) {
     source: 'witty',
     guid,
     title,
-    seriesTitle: titleFromSlug(new URL(base.pageUrl).pathname.split('/').filter(Boolean)[0] || ''),
+    seriesTitle: titleFromSlug(new URL(pageUrl).pathname.split('/').filter(Boolean)[0] || ''),
     episodeTitle: title,
     year: parseYear(html),
     season: positiveInt(html.match(/stagione\s*(\d+)/i)?.[1]),
     episode: parseWittyEpisode(title) || positiveInt(html.match(/episodio\s*(\d+)/i)?.[1]),
     isClip: /\b(?:clip|promo|trailer|backstage|anticipazioni|highlight|highlights|best moments|momenti|riassunto|prossimamente)\b|nella prossima puntata|nei prossimi episodi|ci aspetta|ci attende/i.test(normalizeTitle(title)) || (duration > 0 && duration < 600),
     isFullEpisode: /puntata|episodio/i.test(title) && !/\b(?:clip|promo|trailer|backstage|anticipazioni|highlight|highlights|best moments|momenti|riassunto|prossimamente)\b|ci aspetta|ci attende/i.test(normalizeTitle(title)),
-    pageUrl: base.pageUrl
+    pageUrl
   };
 }
 
