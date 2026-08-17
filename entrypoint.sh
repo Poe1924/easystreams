@@ -23,6 +23,15 @@ warp-cli --accept-tos registration new
 
 # 4. Configurazione Modalità e Connessione
 warp-cli --accept-tos mode warp
+
+# CinemaCity CDN deve uscire dall'IP VPS, non dal tunnel WARP.
+echo "[WARP] Escludo *.cccdn.net dal tunnel..."
+if warp-cli --accept-tos tunnel host add '*.cccdn.net'; then
+    echo "[WARP] Esclusione *.cccdn.net applicata."
+else
+    echo "[WARP] Impossibile applicare esclusione *.cccdn.net."
+fi
+
 warp-cli --accept-tos connect
 
 # 5. Attesa connessione effettiva
