@@ -53,19 +53,37 @@ async function ensureCamoufoxInstalled(pythonExe) {
 
         console.warn(`[SC] Camoufox browser missing for ${pythonExe}; running camoufox fetch...`);
         const fetched = await runPythonCommand(pythonExe, ['-m', 'camoufox', 'fetch'], 180000);
-        if (fetched.error) {
-            const details = fetched.stderr || fetched.stdout || fetched.error.message;
-            const failure = new Error(`Camoufox fetch failed: ${details}`);
-            failure.code = 'CAMOUFOX_UNAVAILABLE';
-            camoufoxFailure = failure;
-            camoufoxFailureAt = Date.now();
-            throw failure;
+        let verified = fetched.error
+            ? fetched
+            : await runPythonCommand(pythonExe, checkArgs, 15000);
+
+        if (verified.error) {
+            console.warn('[SC] camoufox fetch did not install a browser; retrying direct package install...');
+            const repaired = await runPythonCommand(
+                pythonExe,
+                ['-c', 'from camoufox.pkgman import camoufox_path; print(camoufox_path(download_if_missing=True))'],
+                300000
+            );
+            if (!repaired.error) {
+                verified = await runPythonCommand(pythonExe, checkArgs, 15000);
+            } else {
+                const fetchDetails = fetched.stderr || fetched.stdout || (fetched.error && fetched.error.message);
+                const repairDetails = repaired.stderr || repaired.stdout || repaired.error.message;
+                const details = [
+                    fetchDetails && `fetch: ${fetchDetails}`,
+                    `direct: ${repairDetails}`
+                ].filter(Boolean).join('; ');
+                const failure = new Error(`Camoufox remains unavailable after fetch: ${details}`);
+                failure.code = 'CAMOUFOX_UNAVAILABLE';
+                camoufoxFailure = failure;
+                camoufoxFailureAt = Date.now();
+                throw failure;
+            }
         }
 
-        const verified = await runPythonCommand(pythonExe, checkArgs, 15000);
         if (verified.error) {
             const details = verified.stderr || verified.stdout || verified.error.message;
-            const failure = new Error(`Camoufox remains unavailable after fetch: ${details}`);
+            const failure = new Error(`Camoufox remains unavailable after install: ${details}`);
             failure.code = 'CAMOUFOX_UNAVAILABLE';
             camoufoxFailure = failure;
             camoufoxFailureAt = Date.now();
