@@ -408,13 +408,20 @@ var require_quality_helper = __commonJS({
   "src/quality_helper.js"(exports2, module2) {
     var { createTimeoutSignal } = require_fetch_helper();
     var USER_AGENT2 = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+    function checkQualityFromText(text) {
+      if (!text) return null;
+      if (/RESOLUTION=\d+x2160/i.test(text) || /RESOLUTION=2160/i.test(text)) return "4K";
+      if (/RESOLUTION=\d+x1440/i.test(text) || /RESOLUTION=1440/i.test(text)) return "1440p";
+      if (/RESOLUTION=\d+x1080/i.test(text) || /RESOLUTION=1080/i.test(text)) return "1080p";
+      if (/RESOLUTION=\d+x720/i.test(text) || /RESOLUTION=720/i.test(text)) return "720p";
+      if (/RESOLUTION=\d+x480/i.test(text) || /RESOLUTION=480/i.test(text)) return "480p";
+      return null;
+    }
     function checkQualityFromPlaylist2(_0) {
       return __async(this, arguments, function* (url, headers = {}) {
         try {
           const finalHeaders = __spreadValues({}, headers);
-          if (!finalHeaders["User-Agent"]) {
-            finalHeaders["User-Agent"] = USER_AGENT2;
-          }
+          if (!finalHeaders["User-Agent"]) finalHeaders["User-Agent"] = USER_AGENT2;
           const timeoutConfig = createTimeoutSignal(3e3);
           try {
             const response = yield fetch(url, {
@@ -428,45 +435,12 @@ var require_quality_helper = __commonJS({
             if (quality) console.log(`[QualityHelper] Detected ${quality} from playlist: ${url}`);
             return quality;
           } finally {
-            if (typeof timeoutConfig.cleanup === "function") {
-              timeoutConfig.cleanup();
-            }
+            if (typeof timeoutConfig.cleanup === "function") timeoutConfig.cleanup();
           }
-        } catch (e) {
+        } catch (_) {
           return null;
         }
       });
-    }
-    function checkItalianAudioInPlaylist2(_0) {
-      return __async(this, arguments, function* (url, headers = {}) {
-        try {
-          const finalHeaders = __spreadValues({}, headers);
-          if (!finalHeaders["User-Agent"]) finalHeaders["User-Agent"] = USER_AGENT2;
-          const timeoutConfig = createTimeoutSignal(3e3);
-          try {
-            const response = yield fetch(url, { headers: finalHeaders, signal: timeoutConfig.signal });
-            if (!response.ok) return false;
-            const text = yield response.text();
-            if (!text.startsWith("#EXTM3U")) return false;
-            const hasAudioTags = /#EXT-X-MEDIA:TYPE=AUDIO/i.test(text);
-            if (!hasAudioTags) return true;
-            return /#EXT-X-MEDIA:TYPE=AUDIO.*(?:LANGUAGE="it"|LANGUAGE="ita"|NAME="Italian"|NAME="Ita")/i.test(text);
-          } finally {
-            if (typeof timeoutConfig.cleanup === "function") timeoutConfig.cleanup();
-          }
-        } catch (e) {
-          return false;
-        }
-      });
-    }
-    function checkQualityFromText(text) {
-      if (!text) return null;
-      if (/RESOLUTION=\d+x2160/i.test(text) || /RESOLUTION=2160/i.test(text)) return "4K";
-      if (/RESOLUTION=\d+x1440/i.test(text) || /RESOLUTION=1440/i.test(text)) return "1440p";
-      if (/RESOLUTION=\d+x1080/i.test(text) || /RESOLUTION=1080/i.test(text)) return "1080p";
-      if (/RESOLUTION=\d+x720/i.test(text) || /RESOLUTION=720/i.test(text)) return "720p";
-      if (/RESOLUTION=\d+x480/i.test(text) || /RESOLUTION=480/i.test(text)) return "480p";
-      return null;
     }
     function getQualityFromUrl(url) {
       if (!url) return null;
@@ -479,7 +453,11 @@ var require_quality_helper = __commonJS({
       if (urlPath.includes("360")) return "360p";
       return null;
     }
-    module2.exports = { checkQualityFromPlaylist: checkQualityFromPlaylist2, getQualityFromUrl, checkQualityFromText, checkItalianAudioInPlaylist: checkItalianAudioInPlaylist2 };
+    module2.exports = {
+      checkQualityFromPlaylist: checkQualityFromPlaylist2,
+      getQualityFromUrl,
+      checkQualityFromText
+    };
   }
 });
 
@@ -490,7 +468,7 @@ var USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, lik
 var SESSION_COOKIE = "sid=32234dfabd14e587764e84405e75e99856c6bef31c6b1752e19897b8ae3d4a21";
 var { extractMixDrop } = require_mixdrop();
 var { formatStream } = require_formatter();
-var { checkQualityFromPlaylist, checkItalianAudioInPlaylist } = require_quality_helper();
+var { checkQualityFromPlaylist } = require_quality_helper();
 function getCookie() {
   var _a, _b;
   try {
@@ -588,7 +566,6 @@ function addCdnStream(streams, tmdbId, type, season, episode, displayName, cooki
     let quality = "720p";
     const detectedQuality = yield checkQualityFromPlaylist(source.url, headers);
     if (detectedQuality) quality = detectedQuality;
-    const hasItalian = yield checkItalianAudioInPlaylist(source.url, headers);
     streams.push({
       name: "AltadefinizioneStreaming - CDN",
       title: displayName,
@@ -597,7 +574,7 @@ function addCdnStream(streams, tmdbId, type, season, episode, displayName, cooki
       headers,
       quality,
       type: "direct",
-      language: hasItalian ? "Italian" : ""
+      language: ""
     });
   });
 }

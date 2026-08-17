@@ -1,6 +1,6 @@
 "use strict";
 
-const { extractVixCloud } = require("../extractors");
+const { extractVixCloud, rewriteVixsrcHost } = require("../extractors");
 const { getProxiedUrl } = require("../extractors/common.js");
 const { formatStream } = require("../formatter.js");
 const { checkQualityFromPlaylist } = require("../quality_helper.js");
@@ -1270,7 +1270,7 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode) {
           streams.push(
             ...vixStreams.map((stream) => ({
               ...stream,
-              easyProxySourceUrl: embedUrl.replace('vixcloud.co', 'cromosino.space'),
+              easyProxySourceUrl: rewriteVixsrcHost(embedUrl),
               name: `AnimeUnity - VixCloud${labelSuffix}`,
               title: displayTitle,
               language: stream.language || streamLanguage
@@ -1317,11 +1317,11 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode) {
     if (!mediaUrl) continue;
     let quality = extractQualityHint(mediaUrl);
     if (mediaUrl.toLowerCase().includes(".m3u8")) {
-      const detected = await checkQualityFromPlaylist(mediaUrl, {
-        "User-Agent": USER_AGENT,
-        Referer: getUnityBaseUrl()
-      });
-      if (detected) quality = detected;
+        const detectedQuality = await checkQualityFromPlaylist(mediaUrl, {
+          "User-Agent": USER_AGENT,
+          Referer: getUnityBaseUrl()
+        });
+      if (detectedQuality) quality = detectedQuality;
     }
     quality = normalizeAnimeUnityQuality(quality);
     fallbackStreams.push({

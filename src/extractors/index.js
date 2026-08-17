@@ -5,7 +5,7 @@ const { extractStreamTape } = require('./streamtape');
 const { extractUqload } = require('./uqload');
 const { extractUpstream } = require('./upstream');
 const { extractVidoza } = require('./vidoza');
-const { extractVixCloud } = require('./vixcloud');
+const { extractVixCloud, rewriteVixsrcHost } = require('./vixcloud');
 const { extractLoadm } = require('./loadm');
 const { extractStreamHG } = require('./streamhg');
 const { extractVidxGo } = require('./vidxgo');
@@ -20,6 +20,7 @@ module.exports = {
   extractUpstream,
   extractVidoza,
   extractVixCloud,
+  rewriteVixsrcHost,
   extractLoadm,
   extractStreamHG,
   extractVidxGo,

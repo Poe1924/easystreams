@@ -6,7 +6,7 @@ const SESSION_COOKIE = 'sid=32234dfabd14e587764e84405e75e99856c6bef31c6b1752e198
 
 const { extractMixDrop } = require('../extractors/mixdrop');
 const { formatStream } = require('../formatter.js');
-const { checkQualityFromPlaylist, checkItalianAudioInPlaylist } = require('../quality_helper.js');
+const { checkQualityFromPlaylist } = require('../quality_helper.js');
 
 function getCookie() {
   try {
@@ -114,7 +114,6 @@ async function addCdnStream(streams, tmdbId, type, season, episode, displayName,
   let quality = "720p";
   const detectedQuality = await checkQualityFromPlaylist(source.url, headers);
   if (detectedQuality) quality = detectedQuality;
-  const hasItalian = await checkItalianAudioInPlaylist(source.url, headers);
 
   streams.push({
     name: "AltadefinizioneStreaming - CDN",
@@ -124,7 +123,7 @@ async function addCdnStream(streams, tmdbId, type, season, episode, displayName,
     headers: headers,
     quality: quality,
     type: "direct",
-    language: hasItalian ? 'Italian' : ''
+    language: ''
   });
 }
 

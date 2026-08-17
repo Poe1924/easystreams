@@ -26,7 +26,7 @@ if (!IS_SERVER) {
     const { smartFetch } = require('../utils/cf_handler');
     const { hasActiveBypass } = require('../../cf_bypass');
     const { USER_AGENT, getProxiedUrl } = require('../extractors/common');
-    const { extractLoadm } = require('../extractors');
+    const { extractLoadm } = require('../extractors/loadm');
     const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || '').trim().toLowerCase() === '1';
     const GUARDOSERIE_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json';
     let guardoserieBaseUrl = null;

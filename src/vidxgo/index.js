@@ -114,8 +114,7 @@ if (!IS_SERVER) {
   const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 
   const { extractVidxGo } = require('../extractors/vidxgo');
-  require('../fetch_helper.js');
-  const { checkQualityFromPlaylist, checkItalianAudioInPlaylist } = require('../quality_helper.js');
+  const { checkQualityFromPlaylist } = require('../quality_helper.js');
   const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
 
   function getQualityFromName(qualityStr) {
@@ -327,11 +326,9 @@ if (!IS_SERVER) {
 
         if (vidxgoStream && vidxgoStream.url) {
           let quality = "HD";
-          let hasItalian = false;
           if (!shouldUseEasyProxy) {
             const detectedQuality = yield checkQualityFromPlaylist(vidxgoStream.url, vidxgoStream.headers);
             if (detectedQuality) quality = detectedQuality;
-            hasItalian = yield checkItalianAudioInPlaylist(vidxgoStream.url, vidxgoStream.headers);
           }
           streams.push({
             url: vidxgoStream.url,
@@ -341,7 +338,7 @@ if (!IS_SERVER) {
             title: displayName,
             quality: getQualityFromName(quality),
             type: "direct",
-            language: hasItalian ? 'Italian' : ''
+            language: ''
           });
         }
         mark("vidxgo_extracted", { ok: Boolean(vidxgoStream && vidxgoStream.url) });
