@@ -8817,7 +8817,13 @@ var require_streamingcommunity = __commonJS({
             }
             const [playlistRawUrl, existingQuery] = masterPlaylist.url.split("?");
             const urlWithExt = playlistRawUrl.endsWith(".m3u8") ? playlistRawUrl : `${playlistRawUrl}.m3u8`;
-            const queryParts = [existingQuery, `token=${encodeURIComponent(masterPlaylist.token)}`, `expires=${encodeURIComponent(masterPlaylist.expires)}`, "h=1", "lang=it"].filter(Boolean);
+            const queryParts = [
+              existingQuery,
+              `token=${encodeURIComponent(masterPlaylist.token)}`,
+              `expires=${encodeURIComponent(masterPlaylist.expires)}`,
+              !isSczSource ? "h=1" : null,
+              "lang=it"
+            ].filter(Boolean);
             const rawStreamUrl = `${urlWithExt}?${queryParts.join("&")}`;
             const streamUrl = rewriteStreamingCommunityHost(rawStreamUrl);
             const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
