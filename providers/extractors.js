@@ -551,13 +551,20 @@ var require_quality_helper = __commonJS({
   "src/quality_helper.js"(exports2, module2) {
     var { createTimeoutSignal } = require_fetch_helper();
     var USER_AGENT2 = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+    function checkQualityFromText(text) {
+      if (!text) return null;
+      if (/RESOLUTION=\d+x2160/i.test(text) || /RESOLUTION=2160/i.test(text)) return "4K";
+      if (/RESOLUTION=\d+x1440/i.test(text) || /RESOLUTION=1440/i.test(text)) return "1440p";
+      if (/RESOLUTION=\d+x1080/i.test(text) || /RESOLUTION=1080/i.test(text)) return "1080p";
+      if (/RESOLUTION=\d+x720/i.test(text) || /RESOLUTION=720/i.test(text)) return "720p";
+      if (/RESOLUTION=\d+x480/i.test(text) || /RESOLUTION=480/i.test(text)) return "480p";
+      return null;
+    }
     function checkQualityFromPlaylist(_0) {
       return __async(this, arguments, function* (url, headers = {}) {
         try {
           const finalHeaders = __spreadValues({}, headers);
-          if (!finalHeaders["User-Agent"]) {
-            finalHeaders["User-Agent"] = USER_AGENT2;
-          }
+          if (!finalHeaders["User-Agent"]) finalHeaders["User-Agent"] = USER_AGENT2;
           const timeoutConfig = createTimeoutSignal(3e3);
           try {
             const response = yield fetch(url, {
@@ -571,45 +578,12 @@ var require_quality_helper = __commonJS({
             if (quality) console.log(`[QualityHelper] Detected ${quality} from playlist: ${url}`);
             return quality;
           } finally {
-            if (typeof timeoutConfig.cleanup === "function") {
-              timeoutConfig.cleanup();
-            }
+            if (typeof timeoutConfig.cleanup === "function") timeoutConfig.cleanup();
           }
-        } catch (e) {
+        } catch (_) {
           return null;
         }
       });
-    }
-    function checkItalianAudioInPlaylist(_0) {
-      return __async(this, arguments, function* (url, headers = {}) {
-        try {
-          const finalHeaders = __spreadValues({}, headers);
-          if (!finalHeaders["User-Agent"]) finalHeaders["User-Agent"] = USER_AGENT2;
-          const timeoutConfig = createTimeoutSignal(3e3);
-          try {
-            const response = yield fetch(url, { headers: finalHeaders, signal: timeoutConfig.signal });
-            if (!response.ok) return false;
-            const text = yield response.text();
-            if (!text.startsWith("#EXTM3U")) return false;
-            const hasAudioTags = /#EXT-X-MEDIA:TYPE=AUDIO/i.test(text);
-            if (!hasAudioTags) return true;
-            return /#EXT-X-MEDIA:TYPE=AUDIO.*(?:LANGUAGE="it"|LANGUAGE="ita"|NAME="Italian"|NAME="Ita")/i.test(text);
-          } finally {
-            if (typeof timeoutConfig.cleanup === "function") timeoutConfig.cleanup();
-          }
-        } catch (e) {
-          return false;
-        }
-      });
-    }
-    function checkQualityFromText(text) {
-      if (!text) return null;
-      if (/RESOLUTION=\d+x2160/i.test(text) || /RESOLUTION=2160/i.test(text)) return "4K";
-      if (/RESOLUTION=\d+x1440/i.test(text) || /RESOLUTION=1440/i.test(text)) return "1440p";
-      if (/RESOLUTION=\d+x1080/i.test(text) || /RESOLUTION=1080/i.test(text)) return "1080p";
-      if (/RESOLUTION=\d+x720/i.test(text) || /RESOLUTION=720/i.test(text)) return "720p";
-      if (/RESOLUTION=\d+x480/i.test(text) || /RESOLUTION=480/i.test(text)) return "480p";
-      return null;
     }
     function getQualityFromUrl(url) {
       if (!url) return null;
@@ -622,7 +596,11 @@ var require_quality_helper = __commonJS({
       if (urlPath.includes("360")) return "360p";
       return null;
     }
-    module2.exports = { checkQualityFromPlaylist, getQualityFromUrl, checkQualityFromText, checkItalianAudioInPlaylist };
+    module2.exports = {
+      checkQualityFromPlaylist,
+      getQualityFromUrl,
+      checkQualityFromText
+    };
   }
 });
 
@@ -631,14 +609,68 @@ var require_vixcloud = __commonJS({
   "src/extractors/vixcloud.js"(exports2, module2) {
     var { USER_AGENT: USER_AGENT2 } = require_common();
     var { checkQualityFromPlaylist } = require_quality_helper();
+    var VIXSRC_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+    var VIXSRC_DEFAULT_BASE_URL = "https://dancingmonkeyvideolover.xyz";
+    var VIXSRC_BASE_URL_OVERRIDE = String(
+      typeof process !== "undefined" && process.env && process.env.VIXSRC_BASE_URL || ""
+    ).trim();
+    function normalizeVixsrcBaseUrl(value) {
+      try {
+        const parsed = new URL(String(value || "").trim());
+        if (!/^https?:$/i.test(parsed.protocol) || !parsed.hostname) return null;
+        return parsed.toString().replace(/\/+$/, "");
+      } catch (_) {
+        return null;
+      }
+    }
+    var vixsrcBaseUrl = normalizeVixsrcBaseUrl(VIXSRC_BASE_URL_OVERRIDE) || VIXSRC_DEFAULT_BASE_URL;
+    var vixsrcMediaHost = new URL(vixsrcBaseUrl).hostname;
+    var vixsrcConfigLoaded = Boolean(VIXSRC_BASE_URL_OVERRIDE);
+    var vixsrcConfigPromise = null;
+    function loadVixsrcConfig() {
+      return __async(this, null, function* () {
+        if (vixsrcConfigLoaded) return vixsrcBaseUrl;
+        if (vixsrcConfigPromise) return yield vixsrcConfigPromise;
+        vixsrcConfigPromise = (() => __async(null, null, function* () {
+          let timeoutId = null;
+          const controller = typeof AbortController === "function" ? new AbortController() : null;
+          try {
+            if (controller) timeoutId = setTimeout(() => controller.abort(), 5e3);
+            const response = yield fetch(VIXSRC_CONFIG_URL, __spreadValues({
+              headers: { Accept: "application/json" }
+            }, controller ? { signal: controller.signal } : {}));
+            if (!response.ok) throw new Error(`Config HTTP ${response.status}`);
+            const config = yield response.json();
+            const nextBaseUrl = normalizeVixsrcBaseUrl(config == null ? void 0 : config.vixsrc);
+            if (nextBaseUrl) {
+              vixsrcBaseUrl = nextBaseUrl;
+              vixsrcMediaHost = new URL(nextBaseUrl).hostname;
+            }
+          } catch (error) {
+            console.warn(`[VixCloud] Vixsrc config unavailable, using fallback: ${error.message}`);
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+            vixsrcConfigLoaded = true;
+            vixsrcConfigPromise = null;
+          }
+          return vixsrcBaseUrl;
+        }))();
+        return yield vixsrcConfigPromise;
+      });
+    }
+    function rewriteVixsrcHost2(value) {
+      return String(value || "").replace(/vixcloud\.co/gi, vixsrcMediaHost).replace(/vixsrc\.to/gi, vixsrcMediaHost);
+    }
     function extractVixCloud2(url) {
       return __async(this, null, function* () {
         try {
-          const fixedUrl = url.replace("vixcloud.co", "cromosino.space");
+          yield loadVixsrcConfig();
+          const fixedUrl = rewriteVixsrcHost2(url);
+          const vixsrcReferer = rewriteVixsrcHost2("https://vixcloud.co/");
           const response = yield fetch(fixedUrl, {
             headers: {
               "User-Agent": USER_AGENT2,
-              "Referer": "https://vixcloud.co/"
+              "Referer": vixsrcReferer
             }
           });
           if (!response.ok) return null;
@@ -671,19 +703,19 @@ var require_vixcloud = __commonJS({
               finalUrl += "?" + parts.slice(1).join("?");
             }
             let quality = "1080p";
-            const checkUrl = finalUrl.replace("vixcloud.co", "cromosino.space");
-            const detectedQuality = yield checkQualityFromPlaylist(checkUrl, {
+            const streamUrl = rewriteVixsrcHost2(finalUrl);
+            const detectedQuality = yield checkQualityFromPlaylist(streamUrl, {
               "User-Agent": USER_AGENT2,
-              "Referer": "https://vixcloud.co/"
+              "Referer": vixsrcReferer
             });
             if (detectedQuality) quality = detectedQuality;
             streams.push({
-              url: finalUrl.replace("vixcloud.co", "cromosino.space"),
+              url: streamUrl,
               quality,
               type: "m3u8",
               headers: {
                 "User-Agent": USER_AGENT2,
-                "Referer": "https://vixcloud.co/"
+                "Referer": vixsrcReferer
               }
             });
           }
@@ -694,7 +726,7 @@ var require_vixcloud = __commonJS({
         }
       });
     }
-    module2.exports = { extractVixCloud: extractVixCloud2 };
+    module2.exports = { extractVixCloud: extractVixCloud2, rewriteVixsrcHost: rewriteVixsrcHost2 };
   }
 });
 
@@ -7510,7 +7542,7 @@ var { extractStreamTape } = require_streamtape();
 var { extractUqload } = require_uqload();
 var { extractUpstream } = require_upstream();
 var { extractVidoza } = require_vidoza();
-var { extractVixCloud } = require_vixcloud();
+var { extractVixCloud, rewriteVixsrcHost } = require_vixcloud();
 var { extractLoadm } = require_loadm();
 var { extractStreamHG } = require_streamhg();
 var { extractVidxGo } = require_vidxgo();
@@ -7524,6 +7556,7 @@ module.exports = {
   extractUpstream,
   extractVidoza,
   extractVixCloud,
+  rewriteVixsrcHost,
   extractLoadm,
   extractStreamHG,
   extractVidxGo,

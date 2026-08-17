@@ -1,13 +1,75 @@
 const { USER_AGENT } = require('./common');
 const { checkQualityFromPlaylist } = require('../quality_helper.js');
 
+const VIXSRC_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json';
+const VIXSRC_DEFAULT_BASE_URL = 'https://dancingmonkeyvideolover.xyz';
+const VIXSRC_BASE_URL_OVERRIDE = String(
+    (typeof process !== 'undefined' && process.env && process.env.VIXSRC_BASE_URL) || ''
+).trim();
+
+function normalizeVixsrcBaseUrl(value) {
+    try {
+        const parsed = new URL(String(value || '').trim());
+        if (!/^https?:$/i.test(parsed.protocol) || !parsed.hostname) return null;
+        return parsed.toString().replace(/\/+$/, '');
+    } catch (_) {
+        return null;
+    }
+}
+
+let vixsrcBaseUrl = normalizeVixsrcBaseUrl(VIXSRC_BASE_URL_OVERRIDE) || VIXSRC_DEFAULT_BASE_URL;
+let vixsrcMediaHost = new URL(vixsrcBaseUrl).hostname;
+let vixsrcConfigLoaded = Boolean(VIXSRC_BASE_URL_OVERRIDE);
+let vixsrcConfigPromise = null;
+
+async function loadVixsrcConfig() {
+    if (vixsrcConfigLoaded) return vixsrcBaseUrl;
+    if (vixsrcConfigPromise) return await vixsrcConfigPromise;
+
+    vixsrcConfigPromise = (async () => {
+        let timeoutId = null;
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        try {
+            if (controller) timeoutId = setTimeout(() => controller.abort(), 5000);
+            const response = await fetch(VIXSRC_CONFIG_URL, {
+                headers: { Accept: 'application/json' },
+                ...(controller ? { signal: controller.signal } : {})
+            });
+            if (!response.ok) throw new Error(`Config HTTP ${response.status}`);
+            const config = await response.json();
+            const nextBaseUrl = normalizeVixsrcBaseUrl(config?.vixsrc);
+            if (nextBaseUrl) {
+                vixsrcBaseUrl = nextBaseUrl;
+                vixsrcMediaHost = new URL(nextBaseUrl).hostname;
+            }
+        } catch (error) {
+            console.warn(`[VixCloud] Vixsrc config unavailable, using fallback: ${error.message}`);
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+            vixsrcConfigLoaded = true;
+            vixsrcConfigPromise = null;
+        }
+        return vixsrcBaseUrl;
+    })();
+
+    return await vixsrcConfigPromise;
+}
+
+function rewriteVixsrcHost(value) {
+    return String(value || '')
+        .replace(/vixcloud\.co/gi, vixsrcMediaHost)
+        .replace(/vixsrc\.to/gi, vixsrcMediaHost);
+}
+
 async function extractVixCloud(url) {
     try {
-        const fixedUrl = url.replace('vixcloud.co', 'cromosino.space');
+        await loadVixsrcConfig();
+        const fixedUrl = rewriteVixsrcHost(url);
+        const vixsrcReferer = rewriteVixsrcHost('https://vixcloud.co/');
         const response = await fetch(fixedUrl, {
             headers: {
                 "User-Agent": USER_AGENT,
-                "Referer": "https://vixcloud.co/"
+                "Referer": vixsrcReferer
             }
         });
 
@@ -50,20 +112,20 @@ async function extractVixCloud(url) {
             }
 
             let quality = "1080p";
-            const checkUrl = finalUrl.replace('vixcloud.co', 'cromosino.space');
-            const detectedQuality = await checkQualityFromPlaylist(checkUrl, {
+            const streamUrl = rewriteVixsrcHost(finalUrl);
+            const detectedQuality = await checkQualityFromPlaylist(streamUrl, {
                 "User-Agent": USER_AGENT,
-                "Referer": "https://vixcloud.co/"
+                "Referer": vixsrcReferer
             });
             if (detectedQuality) quality = detectedQuality;
 
             streams.push({
-                url: finalUrl.replace('vixcloud.co', 'cromosino.space'),
+                url: streamUrl,
                 quality: quality,
                 type: "m3u8",
                 headers: {
                     "User-Agent": USER_AGENT,
-                    "Referer": "https://vixcloud.co/"
+                    "Referer": vixsrcReferer
                 }
             });
         }
@@ -76,4 +138,4 @@ async function extractVixCloud(url) {
     }
 }
 
-module.exports = { extractVixCloud };
+module.exports = { extractVixCloud, rewriteVixsrcHost };

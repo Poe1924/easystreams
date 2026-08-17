@@ -253,13 +253,20 @@ var require_quality_helper = __commonJS({
   "src/quality_helper.js"(exports2, module2) {
     var { createTimeoutSignal } = require_fetch_helper();
     var USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+    function checkQualityFromText(text) {
+      if (!text) return null;
+      if (/RESOLUTION=\d+x2160/i.test(text) || /RESOLUTION=2160/i.test(text)) return "4K";
+      if (/RESOLUTION=\d+x1440/i.test(text) || /RESOLUTION=1440/i.test(text)) return "1440p";
+      if (/RESOLUTION=\d+x1080/i.test(text) || /RESOLUTION=1080/i.test(text)) return "1080p";
+      if (/RESOLUTION=\d+x720/i.test(text) || /RESOLUTION=720/i.test(text)) return "720p";
+      if (/RESOLUTION=\d+x480/i.test(text) || /RESOLUTION=480/i.test(text)) return "480p";
+      return null;
+    }
     function checkQualityFromPlaylist2(_0) {
       return __async(this, arguments, function* (url, headers = {}) {
         try {
           const finalHeaders = __spreadValues({}, headers);
-          if (!finalHeaders["User-Agent"]) {
-            finalHeaders["User-Agent"] = USER_AGENT;
-          }
+          if (!finalHeaders["User-Agent"]) finalHeaders["User-Agent"] = USER_AGENT;
           const timeoutConfig = createTimeoutSignal(3e3);
           try {
             const response = yield fetch(url, {
@@ -273,45 +280,12 @@ var require_quality_helper = __commonJS({
             if (quality) console.log(`[QualityHelper] Detected ${quality} from playlist: ${url}`);
             return quality;
           } finally {
-            if (typeof timeoutConfig.cleanup === "function") {
-              timeoutConfig.cleanup();
-            }
+            if (typeof timeoutConfig.cleanup === "function") timeoutConfig.cleanup();
           }
-        } catch (e) {
+        } catch (_) {
           return null;
         }
       });
-    }
-    function checkItalianAudioInPlaylist(_0) {
-      return __async(this, arguments, function* (url, headers = {}) {
-        try {
-          const finalHeaders = __spreadValues({}, headers);
-          if (!finalHeaders["User-Agent"]) finalHeaders["User-Agent"] = USER_AGENT;
-          const timeoutConfig = createTimeoutSignal(3e3);
-          try {
-            const response = yield fetch(url, { headers: finalHeaders, signal: timeoutConfig.signal });
-            if (!response.ok) return false;
-            const text = yield response.text();
-            if (!text.startsWith("#EXTM3U")) return false;
-            const hasAudioTags = /#EXT-X-MEDIA:TYPE=AUDIO/i.test(text);
-            if (!hasAudioTags) return true;
-            return /#EXT-X-MEDIA:TYPE=AUDIO.*(?:LANGUAGE="it"|LANGUAGE="ita"|NAME="Italian"|NAME="Ita")/i.test(text);
-          } finally {
-            if (typeof timeoutConfig.cleanup === "function") timeoutConfig.cleanup();
-          }
-        } catch (e) {
-          return false;
-        }
-      });
-    }
-    function checkQualityFromText(text) {
-      if (!text) return null;
-      if (/RESOLUTION=\d+x2160/i.test(text) || /RESOLUTION=2160/i.test(text)) return "4K";
-      if (/RESOLUTION=\d+x1440/i.test(text) || /RESOLUTION=1440/i.test(text)) return "1440p";
-      if (/RESOLUTION=\d+x1080/i.test(text) || /RESOLUTION=1080/i.test(text)) return "1080p";
-      if (/RESOLUTION=\d+x720/i.test(text) || /RESOLUTION=720/i.test(text)) return "720p";
-      if (/RESOLUTION=\d+x480/i.test(text) || /RESOLUTION=480/i.test(text)) return "480p";
-      return null;
     }
     function getQualityFromUrl(url) {
       if (!url) return null;
@@ -324,14 +298,18 @@ var require_quality_helper = __commonJS({
       if (urlPath.includes("360")) return "360p";
       return null;
     }
-    module2.exports = { checkQualityFromPlaylist: checkQualityFromPlaylist2, getQualityFromUrl, checkQualityFromText, checkItalianAudioInPlaylist };
+    module2.exports = {
+      checkQualityFromPlaylist: checkQualityFromPlaylist2,
+      getQualityFromUrl,
+      checkQualityFromText
+    };
   }
 });
 
 // cf_bypass.js
 var require_cf_bypass = __commonJS({
   "cf_bypass.js"(exports2, module2) {
-    var { spawn, exec } = require("child_process");
+    var { spawn, exec, execFile } = require("child_process");
     var path = require("path");
     var fs = require("fs");
     var http = require("http");
@@ -344,6 +322,80 @@ var require_cf_bypass = __commonJS({
     var SCRAPLING_DEFAULT_TIMEOUT = parseInt(process.env.SCRAPLING_DEFAULT_TIMEOUT_MS || "90000", 10);
     var SCRAPLING_WATCHDOG_GRACE_MS = parseInt(process.env.SCRAPLING_WATCHDOG_GRACE_MS || "15000", 10);
     var daemonProcess = null;
+    var camoufoxReady = false;
+    var camoufoxEnsurePromise = null;
+    var camoufoxFailure = null;
+    var camoufoxFailureAt = 0;
+    var CAMOUFOX_FAILURE_COOLDOWN_MS = 6e4;
+    function runPythonCommand(pythonExe, args, timeout) {
+      return new Promise((resolve) => {
+        execFile(pythonExe, args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+          resolve({
+            error,
+            stdout: String(stdout || "").trim(),
+            stderr: String(stderr || "").trim()
+          });
+        });
+      });
+    }
+    function ensureCamoufoxInstalled(pythonExe) {
+      return __async(this, null, function* () {
+        if (camoufoxReady) return;
+        if (camoufoxFailure && Date.now() - camoufoxFailureAt < CAMOUFOX_FAILURE_COOLDOWN_MS) {
+          throw camoufoxFailure;
+        }
+        if (camoufoxEnsurePromise) return yield camoufoxEnsurePromise;
+        camoufoxEnsurePromise = (() => __async(null, null, function* () {
+          const checkArgs = ["-c", "from camoufox.pkgman import installed_verstr; print(installed_verstr())"];
+          const check = yield runPythonCommand(pythonExe, checkArgs, 15e3);
+          if (!check.error) {
+            camoufoxReady = true;
+            return;
+          }
+          console.warn(`[SC] Camoufox browser missing for ${pythonExe}; running camoufox fetch...`);
+          const fetched = yield runPythonCommand(pythonExe, ["-m", "camoufox", "fetch"], 18e4);
+          let verified = fetched.error ? fetched : yield runPythonCommand(pythonExe, checkArgs, 15e3);
+          if (verified.error) {
+            console.warn("[SC] camoufox fetch did not install a browser; retrying release-tag installer...");
+            const installerScript = path.join(__dirname, "scripts", "install_camoufox.py");
+            const repaired = yield runPythonCommand(
+              pythonExe,
+              fs.existsSync(installerScript) ? [installerScript] : ["-c", "from camoufox.pkgman import camoufox_path; print(camoufox_path(download_if_missing=True))"],
+              3e5
+            );
+            if (!repaired.error) {
+              verified = yield runPythonCommand(pythonExe, checkArgs, 15e3);
+            } else {
+              const fetchDetails = fetched.stderr || fetched.stdout || fetched.error && fetched.error.message;
+              const repairDetails = repaired.stderr || repaired.stdout || repaired.error.message;
+              const details = [
+                fetchDetails && `fetch: ${fetchDetails}`,
+                `direct: ${repairDetails}`
+              ].filter(Boolean).join("; ");
+              const failure = new Error(`Camoufox remains unavailable after fetch: ${details}`);
+              failure.code = "CAMOUFOX_UNAVAILABLE";
+              camoufoxFailure = failure;
+              camoufoxFailureAt = Date.now();
+              throw failure;
+            }
+          }
+          if (verified.error) {
+            const details = verified.stderr || verified.stdout || verified.error.message;
+            const failure = new Error(`Camoufox remains unavailable after install: ${details}`);
+            failure.code = "CAMOUFOX_UNAVAILABLE";
+            camoufoxFailure = failure;
+            camoufoxFailureAt = Date.now();
+            throw failure;
+          }
+          camoufoxReady = true;
+          camoufoxFailure = null;
+          camoufoxFailureAt = 0;
+        }))().finally(() => {
+          camoufoxEnsurePromise = null;
+        });
+        return yield camoufoxEnsurePromise;
+      });
+    }
     function createRelease() {
       let released = false;
       return () => {
@@ -394,6 +446,7 @@ var require_cf_bypass = __commonJS({
         const daemonScript = path.join(__dirname, "src", "utils", "cf_daemon.py");
         if (!fs.existsSync(daemonScript)) return;
         const pythonExe = getPythonExe();
+        yield ensureCamoufoxInstalled(pythonExe);
         console.log(`[SC] Avvio Camoufox Daemon in background...`);
         daemonProcess = spawn(pythonExe, [daemonScript], {
           stdio: ["ignore", "inherit", "inherit"],
@@ -454,6 +507,9 @@ var require_cf_bypass = __commonJS({
     }
     function execPythonBypass(url, provider, options = {}) {
       return requestDaemon(url, provider, options).catch((err) => {
+        if (err && err.code === "CAMOUFOX_UNAVAILABLE") {
+          throw err;
+        }
         console.log(`[SC][${provider}] Daemon non disponibile (${err.message}), fallback a processo singolo...`);
         return execPythonBypassSingle(url, provider, options);
       });
@@ -998,456 +1054,6 @@ var require_common = __commonJS({
       getProxiedUrl,
       isFlareSolverrBlockedError
     };
-  }
-});
-
-// src/extractors/mixdrop.js
-var require_mixdrop = __commonJS({
-  "src/extractors/mixdrop.js"(exports2, module2) {
-    var { USER_AGENT, unPack } = require_common();
-    function isMixDropDisabled() {
-      const rawEnv = typeof process !== "undefined" && process && process.env && typeof process.env.DISABLE_MIXDROP === "string" ? process.env.DISABLE_MIXDROP.trim().toLowerCase() : "";
-      return ["1", "true", "yes", "on"].includes(rawEnv);
-    }
-    function normalizeUrl(url, baseUrl) {
-      try {
-        return new URL(String(url || ""), baseUrl).toString();
-      } catch (e) {
-        return null;
-      }
-    }
-    function extractPackedStream(html) {
-      const packedRegex = /eval\(function\(p,a,c,k,e,d\)\s*\{.*?\}\s*\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\),(\d+),(\{\})\)\)/;
-      const match = packedRegex.exec(String(html || ""));
-      if (!match) return null;
-      const p = match[1];
-      const a = parseInt(match[2]);
-      const c = parseInt(match[3]);
-      const k = match[4].split("|");
-      const unpacked = unPack(p, a, c, k, null, {});
-      const wurlMatch = unpacked.match(/wurl\s*=\s*["']([^"']+)["']/);
-      if (!wurlMatch) return null;
-      let streamUrl = wurlMatch[1];
-      if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-      return streamUrl;
-    }
-    function extractEmbedUrl(html, pageUrl) {
-      const match = String(html || "").match(/<iframe\b[^>]+src=["']([^"']*\/e\/[^"']+)["']/i);
-      if (match) return normalizeUrl(match[1], pageUrl);
-      const converted = String(pageUrl || "").replace(/\/f\//i, "/e/");
-      return converted !== pageUrl ? converted : null;
-    }
-    function extractMixDrop(url, refererBase = "https://m1xdrop.net/") {
-      return __async(this, null, function* () {
-        if (isMixDropDisabled()) return null;
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const fetchHtml = (targetUrl2, referer) => __async(null, null, function* () {
-            const response = yield fetch(targetUrl2, {
-              headers: {
-                "User-Agent": USER_AGENT,
-                "Referer": referer,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-                "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
-              }
-            });
-            if (!response.ok) return null;
-            return {
-              url: response.url || targetUrl2,
-              html: yield response.text()
-            };
-          });
-          let page = yield fetchHtml(url, refererBase);
-          if (!page) return null;
-          let streamUrl = extractPackedStream(page.html);
-          let pageUrl = page.url;
-          if (!streamUrl) {
-            const embedUrl = extractEmbedUrl(page.html, pageUrl);
-            if (embedUrl && embedUrl !== pageUrl) {
-              const embedPage = yield fetchHtml(embedUrl, pageUrl);
-              if (embedPage) {
-                page = embedPage;
-                pageUrl = embedPage.url;
-                streamUrl = extractPackedStream(embedPage.html);
-              }
-            }
-          }
-          if (!streamUrl) return null;
-          const origin = (() => {
-            try {
-              return new URL(pageUrl).origin;
-            } catch (e) {
-              return "";
-            }
-          })();
-          return {
-            url: streamUrl,
-            referer: pageUrl,
-            userAgent: USER_AGENT,
-            headers: {
-              "User-Agent": USER_AGENT,
-              "Referer": pageUrl,
-              "Origin": origin,
-              "Accept": "*/*",
-              "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
-            }
-          };
-        } catch (e) {
-          console.error("[Extractors] MixDrop extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractMixDrop };
-  }
-});
-
-// src/extractors/dropload.js
-var require_dropload = __commonJS({
-  "src/extractors/dropload.js"(exports2, module2) {
-    var { USER_AGENT, unPack } = require_common();
-    function extractDropLoad(url, refererBase = null) {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          if (!refererBase) {
-            const match2 = url.match(/^(https?:\/\/[^\/]+)/i);
-            refererBase = (match2 ? match2[1] : "") + "/";
-          }
-          const response = yield fetch(url, {
-            headers: {
-              "User-Agent": USER_AGENT,
-              "Referer": refererBase
-            }
-          });
-          if (!response.ok) return null;
-          const html = yield response.text();
-          const regex = /eval\(function\(p,a,c,k,e,d\)\s*\{.*?\}\s*\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('([\\|]*)'\)/;
-          const match = regex.exec(html);
-          if (match) {
-            const p = match[1];
-            const a = parseInt(match[2]);
-            const c = parseInt(match[3]);
-            const separator = match[5] || "|";
-            const k = match[4].split(separator);
-            const unpacked = unPack(p, a, c, k, null, {});
-            const fileMatch = unpacked.match(/file\s*:\s*["'](.*?)["']/);
-            if (fileMatch) {
-              let streamUrl = fileMatch[1];
-              if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-              const originMatch = url.match(/^(https?:\/\/[^\/]+)/i);
-              const origin = originMatch ? originMatch[1] : "";
-              return {
-                url: streamUrl,
-                headers: {
-                  "User-Agent": USER_AGENT,
-                  "Referer": url,
-                  "Origin": origin
-                }
-              };
-            }
-          }
-          return null;
-        } catch (e) {
-          const errorCode = e && e.code || e && e.cause && e.cause.code;
-          if (errorCode === "ENOTFOUND") return null;
-          console.error("[Extractors] DropLoad extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractDropLoad };
-  }
-});
-
-// src/extractors/supervideo.js
-var require_supervideo = __commonJS({
-  "src/extractors/supervideo.js"(exports2, module2) {
-    var { USER_AGENT, unPack, getProxiedUrl } = require_common();
-    function extractSuperVideo(url, refererBase = null) {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const id = url.split("/").pop();
-          const embedUrl = `https://supervideo.tv/e/${id}`;
-          if (!refererBase) refererBase = "https://supervideo.tv/";
-          const proxiedUrl = getProxiedUrl(embedUrl);
-          let response = yield fetch(proxiedUrl, {
-            headers: {
-              "User-Agent": USER_AGENT,
-              "Referer": refererBase
-            }
-          });
-          let html = yield response.text();
-          if (html.includes("Cloudflare") || response.status === 403) {
-            console.log(`[Extractors] SuperVideo (tv) returned 403/Cloudflare`);
-            return null;
-          }
-          const packedRegex = /eval\(function\(p,a,c,k,e,d\)\{.*?\}\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\)/;
-          const match = packedRegex.exec(html);
-          if (match) {
-            const p = match[1];
-            const a = parseInt(match[2]);
-            const c = parseInt(match[3]);
-            const k = match[4].split("|");
-            const unpacked = unPack(p, a, c, k, null, {});
-            const fileMatch = unpacked.match(/sources:\[\{file:"(.*?)"/);
-            if (fileMatch) {
-              let streamUrl = fileMatch[1];
-              if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-              let playbackReferer = refererBase;
-              try {
-                playbackReferer = new URL(streamUrl).origin + "/";
-              } catch (_) {
-                playbackReferer = refererBase || "https://supervideo.tv/";
-              }
-              return {
-                url: streamUrl,
-                headers: {
-                  "Referer": playbackReferer
-                }
-              };
-            }
-          }
-          return null;
-        } catch (e) {
-          console.error("[Extractors] SuperVideo extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractSuperVideo };
-  }
-});
-
-// src/extractors/streamtape.js
-var require_streamtape = __commonJS({
-  "src/extractors/streamtape.js"(exports2, module2) {
-    var { USER_AGENT } = require_common();
-    function extractStreamTape(url) {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const response = yield fetch(url);
-          if (!response.ok) return null;
-          const html = yield response.text();
-          const match = html.match(/document\.getElementById\('robotlink'\)\.innerHTML = '(.*?)'/);
-          if (match) {
-            let link = match[1];
-            const lineMatch = html.match(/document\.getElementById\('robotlink'\)\.innerHTML = (.*);/);
-            if (lineMatch) {
-              const raw = lineMatch[1];
-              const cleanLink = raw.replace(/['"\+\s]/g, "");
-              if (cleanLink.startsWith("//")) return "https:" + cleanLink;
-              if (cleanLink.startsWith("http")) return cleanLink;
-            }
-          }
-          return null;
-        } catch (e) {
-          console.error("[Extractors] StreamTape extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractStreamTape };
-  }
-});
-
-// src/extractors/uqload.js
-var require_uqload = __commonJS({
-  "src/extractors/uqload.js"(exports2, module2) {
-    var { USER_AGENT } = require_common();
-    function isUqloadDisabled() {
-      if (typeof global !== "undefined" && global && global.DISABLE_UQLOAD === true) {
-        return true;
-      }
-      const rawEnv = typeof process !== "undefined" && process && process.env && typeof process.env.DISABLE_UQLOAD === "string" ? process.env.DISABLE_UQLOAD.trim().toLowerCase() : "";
-      return ["1", "true", "yes", "on"].includes(rawEnv);
-    }
-    function extractUqload(url, refererBase = "https://uqload.io/") {
-      return __async(this, null, function* () {
-        if (isUqloadDisabled()) return null;
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const response = yield fetch(url, {
-            headers: {
-              "User-Agent": USER_AGENT,
-              "Referer": refererBase
-            }
-          });
-          if (!response.ok) return null;
-          const html = yield response.text();
-          const regex = /sources: \["(.*?)"\]/;
-          const match = regex.exec(html);
-          if (match) {
-            let streamUrl = match[1];
-            if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-            return {
-              url: streamUrl,
-              headers: {
-                "User-Agent": USER_AGENT,
-                "Referer": "https://uqload.io/"
-              }
-            };
-          }
-          return null;
-        } catch (e) {
-          console.error("[Extractors] Uqload extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractUqload };
-  }
-});
-
-// src/extractors/upstream.js
-var require_upstream = __commonJS({
-  "src/extractors/upstream.js"(exports2, module2) {
-    var { USER_AGENT, unPack } = require_common();
-    function extractUpstream(url, refererBase = "https://upstream.to/") {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const response = yield fetch(url, {
-            headers: {
-              "User-Agent": USER_AGENT,
-              "Referer": refererBase
-            }
-          });
-          if (!response.ok) return null;
-          const html = yield response.text();
-          const packedRegex = /eval\(function\(p,a,c,k,e,d\)\s*\{.*?\}\s*\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\)/;
-          const match = packedRegex.exec(html);
-          if (match) {
-            const p = match[1];
-            const a = parseInt(match[2]);
-            const c = parseInt(match[3]);
-            const k = match[4].split("|");
-            const unpacked = unPack(p, a, c, k, null, {});
-            const fileMatch = unpacked.match(/file:"(.*?)"/);
-            if (fileMatch) {
-              let streamUrl = fileMatch[1];
-              if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-              return {
-                url: streamUrl,
-                headers: {
-                  "User-Agent": USER_AGENT,
-                  "Referer": "https://upstream.to/"
-                }
-              };
-            }
-          }
-          return null;
-        } catch (e) {
-          console.error("[Extractors] Upstream extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractUpstream };
-  }
-});
-
-// src/extractors/vidoza.js
-var require_vidoza = __commonJS({
-  "src/extractors/vidoza.js"(exports2, module2) {
-    function extractVidoza(url) {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const response = yield fetch(url);
-          if (!response.ok) return null;
-          const html = yield response.text();
-          let match = html.match(/sources:\s*\[\s*\{\s*file:\s*"(.*?)"/);
-          if (!match) {
-            match = html.match(/source src="(.*?)"/);
-          }
-          if (match) {
-            let streamUrl = match[1];
-            if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-            return streamUrl;
-          }
-          return null;
-        } catch (e) {
-          console.error("[Extractors] Vidoza extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractVidoza };
-  }
-});
-
-// src/extractors/vixcloud.js
-var require_vixcloud = __commonJS({
-  "src/extractors/vixcloud.js"(exports2, module2) {
-    var { USER_AGENT } = require_common();
-    var { checkQualityFromPlaylist: checkQualityFromPlaylist2 } = require_quality_helper();
-    function extractVixCloud(url) {
-      return __async(this, null, function* () {
-        try {
-          const fixedUrl = url.replace("vixcloud.co", "cromosino.space");
-          const response = yield fetch(fixedUrl, {
-            headers: {
-              "User-Agent": USER_AGENT,
-              "Referer": "https://vixcloud.co/"
-            }
-          });
-          if (!response.ok) return null;
-          const html = yield response.text();
-          const streams = [];
-          const tokenRegex = /'token':\s*'(\w+)'/;
-          const expiresRegex = /'expires':\s*'(\d+)'/;
-          const urlRegex = /url:\s*'([^']+)'/;
-          const fhdRegex = /window\.canPlayFHD\s*=\s*true/;
-          const tokenMatch = tokenRegex.exec(html);
-          const expiresMatch = expiresRegex.exec(html);
-          const urlMatch = urlRegex.exec(html);
-          const fhdMatch = fhdRegex.test(html);
-          if (tokenMatch && expiresMatch && urlMatch) {
-            const token = tokenMatch[1];
-            const expires = expiresMatch[1];
-            let serverUrl = urlMatch[1];
-            let finalUrl = "";
-            if (serverUrl.includes("?b=1")) {
-              finalUrl = `${serverUrl}&token=${token}&expires=${expires}`;
-            } else {
-              finalUrl = `${serverUrl}?token=${token}&expires=${expires}`;
-            }
-            if (fhdMatch) {
-              finalUrl += "&h=1";
-            }
-            const parts = finalUrl.split("?");
-            finalUrl = parts[0] + ".m3u8";
-            if (parts.length > 1) {
-              finalUrl += "?" + parts.slice(1).join("?");
-            }
-            let quality = "1080p";
-            const checkUrl = finalUrl.replace("vixcloud.co", "cromosino.space");
-            const detectedQuality = yield checkQualityFromPlaylist2(checkUrl, {
-              "User-Agent": USER_AGENT,
-              "Referer": "https://vixcloud.co/"
-            });
-            if (detectedQuality) quality = detectedQuality;
-            streams.push({
-              url: finalUrl.replace("vixcloud.co", "cromosino.space"),
-              quality,
-              type: "m3u8",
-              headers: {
-                "User-Agent": USER_AGENT,
-                "Referer": "https://vixcloud.co/"
-              }
-            });
-          }
-          return streams;
-        } catch (e) {
-          console.error("[VixCloud] Extraction error:", e);
-          return [];
-        }
-      });
-    }
-    module2.exports = { extractVixCloud };
   }
 });
 
@@ -8088,206 +7694,6 @@ var require_loadm = __commonJS({
   }
 });
 
-// src/extractors/streamhg.js
-var require_streamhg = __commonJS({
-  "src/extractors/streamhg.js"(exports2, module2) {
-    var { USER_AGENT, unPack, getProxiedUrl } = require_common();
-    function resolveAbsoluteUrl(candidate, baseUrl) {
-      if (!candidate) return null;
-      try {
-        return new URL(candidate, baseUrl).toString();
-      } catch (_) {
-        return null;
-      }
-    }
-    function getOrigin(url) {
-      try {
-        return new URL(url).origin;
-      } catch (_) {
-        return null;
-      }
-    }
-    function getBaseHeaders(referer) {
-      const headers = {
-        "User-Agent": USER_AGENT
-      };
-      if (referer) headers["Referer"] = referer;
-      return headers;
-    }
-    function extractStreamHG(url, refererBase = null) {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const initialReferer = refererBase || `${getOrigin(url) || "https://dhcplay.com"}/`;
-          const candidates = [url];
-          try {
-            const parsed = new URL(url);
-            const idMatch = parsed.pathname.match(/\/e\/([^/?#]+)/i);
-            if (idMatch && /(^|\.)dhcplay\.com$/i.test(parsed.hostname)) {
-              candidates.push(`https://vibuxer.com/e/${idMatch[1]}`);
-            }
-          } catch (_) {
-          }
-          let finalUrl = null;
-          let packedMatch = null;
-          for (const candidate of candidates) {
-            const response = yield fetch(getProxiedUrl(candidate), {
-              headers: getBaseHeaders(initialReferer),
-              redirect: "follow"
-            });
-            if (!response.ok) continue;
-            const html = yield response.text();
-            const match = html.match(new RegExp("eval\\(function\\(p,a,c,k,e,d\\)\\{.*?\\}\\('(.*?)',(\\d+),(\\d+),'(.*?)'\\.split\\('\\|'\\)", "s"));
-            if (!match) continue;
-            finalUrl = response.url || candidate;
-            packedMatch = match;
-            break;
-          }
-          if (!packedMatch || !finalUrl) return null;
-          const p = packedMatch[1];
-          const a = parseInt(packedMatch[2], 10);
-          const c = parseInt(packedMatch[3], 10);
-          const k = packedMatch[4].split("|");
-          const unpacked = unPack(p, a, c, k, null, {});
-          let streamUrl = null;
-          const hls2Match = unpacked.match(/["']hls2["']\s*:\s*["']([^"']+)["']/i);
-          const hls4Match = unpacked.match(/["']hls4["']\s*:\s*["']([^"']+)["']/i);
-          const fileMatch = unpacked.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i);
-          streamUrl = hls2Match && hls2Match[1] || hls4Match && hls4Match[1] || fileMatch && fileMatch[1] || null;
-          streamUrl = resolveAbsoluteUrl(streamUrl, finalUrl);
-          if (!streamUrl) return null;
-          return {
-            url: streamUrl,
-            headers: { "Referer": getOrigin(finalUrl) + "/", "User-Agent": USER_AGENT }
-          };
-        } catch (e) {
-          console.error("[Extractors] StreamHG extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractStreamHG };
-  }
-});
-
-// src/extractors/vidxgo.js
-var require_vidxgo = __commonJS({
-  "src/extractors/vidxgo.js"(exports2, module2) {
-    var VIDXGO_HEADERS = {
-      "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Sec-GPC": "1",
-      "Alt-Used": "v.vidxgo.co",
-      "Connection": "keep-alive",
-      "Upgrade-Insecure-Requests": "1",
-      "Sec-Fetch-Dest": "iframe",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "same-origin",
-      "DNT": "1",
-      "Priority": "u=0, i"
-    };
-    function xorDecrypt(b64, key) {
-      const decoded = Buffer.from(b64, "base64");
-      const result = Buffer.alloc(decoded.length);
-      for (let i = 0; i < decoded.length; i++) {
-        result[i] = decoded[i] ^ key.charCodeAt(i % key.length);
-      }
-      return result.toString("utf-8");
-    }
-    var XOR_PATTERN = /var\s+\w+\s*=\s*'([\w]+)'\s*,?\s*d\s*=\s*atob\s*\(\s*'([A-Za-z0-9+/=]+)'\s*\)/g;
-    var CURRENT_SRC_PATTERN = /\bcurrentSrc\s*=\s*["'](https?:[^"']+?\.m3u8[^"']*)["']/;
-    var CORRUPT_PLAYER_PATTERN = /player-container[^>]*\bcorrupt\b/i;
-    function extractVidxGo(url, referer = "https://v.vidxgo.co/") {
-      return __async(this, null, function* () {
-        try {
-          if (url.startsWith("//")) url = "https:" + url;
-          const headers = __spreadProps(__spreadValues({}, VIDXGO_HEADERS), { "Referer": referer });
-          const resp = yield fetch(url, { headers, redirect: "follow" });
-          if (!resp.ok) {
-            console.warn("[VidxGo] HTTP", resp.status, "for", url);
-            return null;
-          }
-          const html = yield resp.text();
-          let match;
-          XOR_PATTERN.lastIndex = 0;
-          while ((match = XOR_PATTERN.exec(html)) !== null) {
-            try {
-              const decrypted = xorDecrypt(match[2], match[1]);
-              const streamMatch = decrypted.match(CURRENT_SRC_PATTERN);
-              if (streamMatch) {
-                const streamUrl = streamMatch[1].replace(/\\/g, "");
-                const vidxgoOrigin = new URL(url).origin;
-                return {
-                  url: streamUrl,
-                  headers: {
-                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0",
-                    "Referer": url,
-                    "Origin": vidxgoOrigin,
-                    "Accept": "*/*",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Sec-GPC": "1",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "cross-site",
-                    "DNT": "1",
-                    "Priority": "u=0"
-                  }
-                };
-              }
-            } catch (e) {
-              continue;
-            }
-          }
-          if (CORRUPT_PLAYER_PATTERN.test(html)) {
-            console.warn("[VidxGo] Source is marked corrupt or not available");
-            return null;
-          }
-          console.warn("[VidxGo] No stream URL found in page");
-          return null;
-        } catch (e) {
-          console.error("[VidxGo] Extraction error:", e);
-          return null;
-        }
-      });
-    }
-    module2.exports = { extractVidxGo, VIDXGO_HEADERS, CORRUPT_PLAYER_PATTERN };
-  }
-});
-
-// src/extractors/index.js
-var require_extractors = __commonJS({
-  "src/extractors/index.js"(exports2, module2) {
-    var { extractMixDrop } = require_mixdrop();
-    var { extractDropLoad } = require_dropload();
-    var { extractSuperVideo } = require_supervideo();
-    var { extractStreamTape } = require_streamtape();
-    var { extractUqload } = require_uqload();
-    var { extractUpstream } = require_upstream();
-    var { extractVidoza } = require_vidoza();
-    var { extractVixCloud } = require_vixcloud();
-    var { extractLoadm } = require_loadm();
-    var { extractStreamHG } = require_streamhg();
-    var { extractVidxGo } = require_vidxgo();
-    var { USER_AGENT, unPack } = require_common();
-    module2.exports = {
-      extractMixDrop,
-      extractDropLoad,
-      extractSuperVideo,
-      extractStreamTape,
-      extractUqload,
-      extractUpstream,
-      extractVidoza,
-      extractVixCloud,
-      extractLoadm,
-      extractStreamHG,
-      extractVidxGo,
-      USER_AGENT,
-      unPack
-    };
-  }
-});
-
 // src/guardoserie/index.js
 var { formatStream } = require_formatter();
 var { checkQualityFromPlaylist } = require_quality_helper();
@@ -8498,7 +7904,7 @@ if (!IS_SERVER) {
   const { smartFetch } = require_cf_handler();
   const { hasActiveBypass } = require_cf_bypass();
   const { USER_AGENT, getProxiedUrl } = require_common();
-  const { extractLoadm } = require_extractors();
+  const { extractLoadm } = require_loadm();
   const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
   const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
   let guardoserieBaseUrl = null;
