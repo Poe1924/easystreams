@@ -70,7 +70,7 @@
     {
       "id": "easystreams-streamingcommunity",
       "name": "StreamingCommunity",
-      "version": "1.1.58",
+      "version": "1.1.59",
       "description": "Movies and Series from StreamingCommunity",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -96,7 +96,7 @@
     {
       "id": "easystreams-cc",
       "name": "CinemaCity",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "description": "Movies and Series from CinemaCity",
       "resources": ["stream"],
       "contentLanguage": ["it", "en"],

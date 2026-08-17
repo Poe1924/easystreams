@@ -8817,7 +8817,13 @@ var require_streamingcommunity = __commonJS({
             }
             const [playlistRawUrl, existingQuery] = masterPlaylist.url.split("?");
             const urlWithExt = playlistRawUrl.endsWith(".m3u8") ? playlistRawUrl : `${playlistRawUrl}.m3u8`;
-            const queryParts = [existingQuery, `token=${encodeURIComponent(masterPlaylist.token)}`, `expires=${encodeURIComponent(masterPlaylist.expires)}`, "h=1", "lang=it"].filter(Boolean);
+            const queryParts = [
+              existingQuery,
+              `token=${encodeURIComponent(masterPlaylist.token)}`,
+              `expires=${encodeURIComponent(masterPlaylist.expires)}`,
+              !isSczSource ? "h=1" : null,
+              "lang=it"
+            ].filter(Boolean);
             const rawStreamUrl = `${urlWithExt}?${queryParts.join("&")}`;
             const streamUrl = rewriteStreamingCommunityHost(rawStreamUrl);
             const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
@@ -13445,6 +13451,7 @@ var require_cc = __commonJS({
     var BASE_URL = base64Decode("aHR0cHM6Ly9jaW5lbWFjaXR5LmNj");
     var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
     var FETCH_TIMEOUT = 1e4;
+    var STREAM_CHECK_TIMEOUT = 1e3;
     var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
     var SITEMAP_URL = `${BASE_URL}/news_pages.xml`;
     var SITEMAP_CACHE_MS = 60 * 60 * 1e3;
@@ -13930,6 +13937,40 @@ var require_cc = __commonJS({
         return relative;
       }
     }
+    function checkStreamUrl(url) {
+      return __async(this, null, function* () {
+        const headers = {
+          "Referer": `${BASE_URL}/`,
+          "User-Agent": USER_AGENT
+        };
+        try {
+          const response = yield fetchWithTimeout(url, {
+            method: "HEAD",
+            timeout: STREAM_CHECK_TIMEOUT,
+            headers
+          });
+          if (response.ok) return true;
+          if (response.status !== 405 && response.status !== 501) return false;
+        } catch (e) {
+          return false;
+        }
+        try {
+          const response = yield fetchWithTimeout(url, {
+            method: "GET",
+            timeout: STREAM_CHECK_TIMEOUT,
+            headers: __spreadProps(__spreadValues({}, headers), { Range: "bytes=0-1" })
+          });
+          const isAvailable = response.ok;
+          if (response.body && typeof response.body.cancel === "function") {
+            yield response.body.cancel().catch(() => {
+            });
+          }
+          return isAvailable;
+        } catch (e) {
+          return false;
+        }
+      });
+    }
     function getStreams2(id, type, season, episode, providerContext = null) {
       return __async(this, null, function* () {
         const parsedRequest = parseCompositeSeriesId2(id, season, episode);
@@ -14046,6 +14087,10 @@ var require_cc = __commonJS({
           }
           if (!selectedUrl) selectedUrl = links[0].url;
           const streamUrl = resolveUrl(movieUrl, selectedUrl);
+          if (!(yield checkStreamUrl(streamUrl))) {
+            console.warn(`[CinemaCity] Stream pre-check failed`);
+            return [];
+          }
           console.log(`[CinemaCity] Direct stream: ${streamUrl}`);
           const result = {
             name: "CinemaCity",
