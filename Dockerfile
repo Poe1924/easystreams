@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:22-slim
 
 # 1. Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,6 +49,8 @@ RUN curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor
 
 WORKDIR /app
 
+ENV XDG_CACHE_HOME=/opt/camoufox-cache
+
 RUN pip3 install --no-cache-dir \
     "curl_cffi" \
     "camoufox[geoip]" \
@@ -58,7 +60,9 @@ RUN pip3 install --no-cache-dir \
     pyvirtualdisplay \
     Pillow \
     --break-system-packages && \
-    python3 -m camoufox fetch
+    python3 -m camoufox fetch && \
+    python3 -m camoufox version && \
+    chmod -R a+rX "$XDG_CACHE_HOME"
 
 # 3. Environment Settings
 ENV NODE_ENV=production

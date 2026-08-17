@@ -1,5 +1,61 @@
+const STREAMINGCOMMUNITY_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json';
+const STREAMINGCOMMUNITY_DEFAULT_BASE_URL = 'https://dancingmonkeyvideolover.xyz';
+const STREAMINGCOMMUNITY_BASE_URL_OVERRIDE = String(
+  (typeof process !== 'undefined' && process.env && process.env.STREAMINGCOMMUNITY_BASE_URL) || ''
+).trim();
+const STREAMINGCOMMUNITY_MEDIA_HOST_OVERRIDE = String(
+  (typeof process !== 'undefined' && process.env && process.env.STREAMINGCOMMUNITY_MEDIA_HOST) || ''
+).trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+
+function normalizeStreamingCommunityBaseUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    if (!/^https?:$/i.test(parsed.protocol) || !parsed.hostname) return null;
+    return parsed.toString().replace(/\/+$/, '');
+  } catch (_) {
+    return null;
+  }
+}
+
+let streamingCommunityBaseUrl = normalizeStreamingCommunityBaseUrl(STREAMINGCOMMUNITY_BASE_URL_OVERRIDE)
+  || STREAMINGCOMMUNITY_DEFAULT_BASE_URL;
+let streamingCommunityMediaHost = STREAMINGCOMMUNITY_MEDIA_HOST_OVERRIDE
+  || new URL(streamingCommunityBaseUrl).hostname;
+let streamingCommunityConfigLoaded = Boolean(STREAMINGCOMMUNITY_BASE_URL_OVERRIDE);
+let streamingCommunityConfigPromise = null;
+
+async function loadStreamingCommunityConfig() {
+  if (streamingCommunityConfigLoaded) return streamingCommunityBaseUrl;
+  if (streamingCommunityConfigPromise) return await streamingCommunityConfigPromise;
+
+  streamingCommunityConfigPromise = (async () => {
+    try {
+      const response = await fetch(STREAMINGCOMMUNITY_CONFIG_URL, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`Config HTTP ${response.status}`);
+      const config = await response.json();
+      const nextBaseUrl = normalizeStreamingCommunityBaseUrl(config?.vixsrc);
+      if (nextBaseUrl) {
+        streamingCommunityBaseUrl = nextBaseUrl;
+        if (!STREAMINGCOMMUNITY_MEDIA_HOST_OVERRIDE) {
+          streamingCommunityMediaHost = new URL(nextBaseUrl).hostname;
+        }
+      }
+    } catch (error) {
+      console.warn(`[StreamingCommunity] Domains config unavailable, using fallback: ${error.message}`);
+    } finally {
+      streamingCommunityConfigLoaded = true;
+      streamingCommunityConfigPromise = null;
+    }
+    return streamingCommunityBaseUrl;
+  })();
+
+  return await streamingCommunityConfigPromise;
+}
+
 function getStreamingCommunityBaseUrl() {
-  return "https://komiknostalgia.id";
+  return streamingCommunityBaseUrl;
 }
 
 const { formatStream } = require('../formatter.js');
@@ -190,7 +246,7 @@ function getEmbedHeaders(embedUrl) {
 }
 
 function getPlaylistHeaders(embedUrl) {
-  const cleanReferer = String(embedUrl || '').replace('vixcloud.co', 'komiknostalgia.id').replace('vixsrc.to', 'komiknostalgia.id');
+  const cleanReferer = rewriteStreamingCommunityHost(embedUrl);
   return {
     "User-Agent": USER_AGENT,
     "Referer": cleanReferer,
@@ -201,6 +257,12 @@ function getPlaylistHeaders(embedUrl) {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin"
   };
+}
+
+function rewriteStreamingCommunityHost(value) {
+  return String(value || '')
+    .replace(/vixcloud\.co/gi, streamingCommunityMediaHost)
+    .replace(/vixsrc\.to/gi, streamingCommunityMediaHost);
 }
 
 function extractEmbedSrcFromApiPayload(payload) {
@@ -303,6 +365,7 @@ async function getMetadata(id, type) {
 }
 
 async function getStreams(id, type, season, episode, providerContext = null) {
+  await loadStreamingCommunityConfig();
   const requestedType = String(type).toLowerCase();
   const normalizedType = requestedType === "series" ? "tv" : requestedType;
   const baseUrl = getStreamingCommunityBaseUrl();
@@ -419,9 +482,9 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       const urlWithExt = playlistRawUrl.endsWith('.m3u8') ? playlistRawUrl : `${playlistRawUrl}.m3u8`;
       const queryParts = [existingQuery, `token=${encodeURIComponent(masterPlaylist.token)}`, `expires=${encodeURIComponent(masterPlaylist.expires)}`, 'h=1', 'lang=it'].filter(Boolean);
       const rawStreamUrl = `${urlWithExt}?${queryParts.join('&')}`;
-      const streamUrl = rawStreamUrl.replace('vixcloud.co', 'komiknostalgia.id').replace('vixsrc.to', 'komiknostalgia.id');
-      const cleanEmbedUrl = embedUrl.replace('vixcloud.co', 'komiknostalgia.id').replace('vixsrc.to', 'komiknostalgia.id');
-      const cleanIframeUrl = (item.iframeUrl || cleanEmbedUrl).replace('vixcloud.co', 'komiknostalgia.id').replace('vixsrc.to', 'komiknostalgia.id');
+      const streamUrl = rewriteStreamingCommunityHost(rawStreamUrl);
+      const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
+      const cleanIframeUrl = rewriteStreamingCommunityHost(item.iframeUrl || cleanEmbedUrl);
       const streamHeaders = getPlaylistHeaders(cleanEmbedUrl);
       console.log(`[StreamingCommunity] Final stream URL (${item.source}): ${streamUrl}`);
 
