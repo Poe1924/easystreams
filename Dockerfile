@@ -51,6 +51,8 @@ WORKDIR /app
 
 ENV XDG_CACHE_HOME=/opt/camoufox-cache
 
+COPY scripts/install_camoufox.py /tmp/install_camoufox.py
+
 RUN pip3 install --no-cache-dir \
     "curl_cffi" \
     "camoufox[geoip]" \
@@ -61,7 +63,7 @@ RUN pip3 install --no-cache-dir \
     Pillow \
     --break-system-packages && \
     (python3 -m camoufox fetch || true) && \
-    python3 -c "from camoufox.pkgman import camoufox_path; print(camoufox_path(download_if_missing=True))" && \
+    python3 /tmp/install_camoufox.py && \
     python3 -c "from camoufox.pkgman import installed_verstr; print(installed_verstr())" && \
     python3 -m camoufox version && \
     chmod -R a+rX "$XDG_CACHE_HOME"

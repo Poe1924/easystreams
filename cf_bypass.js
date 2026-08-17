@@ -58,10 +58,13 @@ async function ensureCamoufoxInstalled(pythonExe) {
             : await runPythonCommand(pythonExe, checkArgs, 15000);
 
         if (verified.error) {
-            console.warn('[SC] camoufox fetch did not install a browser; retrying direct package install...');
+            console.warn('[SC] camoufox fetch did not install a browser; retrying release-tag installer...');
+            const installerScript = path.join(__dirname, 'scripts', 'install_camoufox.py');
             const repaired = await runPythonCommand(
                 pythonExe,
-                ['-c', 'from camoufox.pkgman import camoufox_path; print(camoufox_path(download_if_missing=True))'],
+                fs.existsSync(installerScript)
+                    ? [installerScript]
+                    : ['-c', 'from camoufox.pkgman import camoufox_path; print(camoufox_path(download_if_missing=True))'],
                 300000
             );
             if (!repaired.error) {
