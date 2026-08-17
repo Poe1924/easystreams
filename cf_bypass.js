@@ -1,4 +1,4 @@
-const { spawn, exec } = require('child_process');
+const { spawn, exec, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -18,6 +18,89 @@ const SCRAPLING_DEFAULT_TIMEOUT = parseInt(process.env.SCRAPLING_DEFAULT_TIMEOUT
 const SCRAPLING_WATCHDOG_GRACE_MS = parseInt(process.env.SCRAPLING_WATCHDOG_GRACE_MS || '15000', 10);
 
 let daemonProcess = null;
+let camoufoxReady = false;
+let camoufoxEnsurePromise = null;
+let camoufoxFailure = null;
+let camoufoxFailureAt = 0;
+const CAMOUFOX_FAILURE_COOLDOWN_MS = 60000;
+
+function runPythonCommand(pythonExe, args, timeout) {
+    return new Promise((resolve) => {
+        execFile(pythonExe, args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+            resolve({
+                error,
+                stdout: String(stdout || '').trim(),
+                stderr: String(stderr || '').trim()
+            });
+        });
+    });
+}
+
+async function ensureCamoufoxInstalled(pythonExe) {
+    if (camoufoxReady) return;
+    if (camoufoxFailure && Date.now() - camoufoxFailureAt < CAMOUFOX_FAILURE_COOLDOWN_MS) {
+        throw camoufoxFailure;
+    }
+    if (camoufoxEnsurePromise) return await camoufoxEnsurePromise;
+
+    camoufoxEnsurePromise = (async () => {
+        const checkArgs = ['-c', 'from camoufox.pkgman import installed_verstr; print(installed_verstr())'];
+        const check = await runPythonCommand(pythonExe, checkArgs, 15000);
+        if (!check.error) {
+            camoufoxReady = true;
+            return;
+        }
+
+        console.warn(`[SC] Camoufox browser missing for ${pythonExe}; running camoufox fetch...`);
+        const fetched = await runPythonCommand(pythonExe, ['-m', 'camoufox', 'fetch'], 180000);
+        let verified = fetched.error
+            ? fetched
+            : await runPythonCommand(pythonExe, checkArgs, 15000);
+
+        if (verified.error) {
+            console.warn('[SC] camoufox fetch did not install a browser; retrying release-tag installer...');
+            const installerScript = path.join(__dirname, 'scripts', 'install_camoufox.py');
+            const repaired = await runPythonCommand(
+                pythonExe,
+                fs.existsSync(installerScript)
+                    ? [installerScript]
+                    : ['-c', 'from camoufox.pkgman import camoufox_path; print(camoufox_path(download_if_missing=True))'],
+                300000
+            );
+            if (!repaired.error) {
+                verified = await runPythonCommand(pythonExe, checkArgs, 15000);
+            } else {
+                const fetchDetails = fetched.stderr || fetched.stdout || (fetched.error && fetched.error.message);
+                const repairDetails = repaired.stderr || repaired.stdout || repaired.error.message;
+                const details = [
+                    fetchDetails && `fetch: ${fetchDetails}`,
+                    `direct: ${repairDetails}`
+                ].filter(Boolean).join('; ');
+                const failure = new Error(`Camoufox remains unavailable after fetch: ${details}`);
+                failure.code = 'CAMOUFOX_UNAVAILABLE';
+                camoufoxFailure = failure;
+                camoufoxFailureAt = Date.now();
+                throw failure;
+            }
+        }
+
+        if (verified.error) {
+            const details = verified.stderr || verified.stdout || verified.error.message;
+            const failure = new Error(`Camoufox remains unavailable after install: ${details}`);
+            failure.code = 'CAMOUFOX_UNAVAILABLE';
+            camoufoxFailure = failure;
+            camoufoxFailureAt = Date.now();
+            throw failure;
+        }
+        camoufoxReady = true;
+        camoufoxFailure = null;
+        camoufoxFailureAt = 0;
+    })().finally(() => {
+        camoufoxEnsurePromise = null;
+    });
+
+    return await camoufoxEnsurePromise;
+}
 
 function createRelease() {
     let released = false;
@@ -76,6 +159,7 @@ async function ensureDaemonStarted() {
     if (!fs.existsSync(daemonScript)) return;
 
     const pythonExe = getPythonExe();
+    await ensureCamoufoxInstalled(pythonExe);
     console.log(`[SC] Avvio Camoufox Daemon in background...`);
     daemonProcess = spawn(pythonExe, [daemonScript], {
         stdio: ['ignore', 'inherit', 'inherit'],
@@ -138,6 +222,9 @@ async function requestDaemon(url, provider, options = {}) {
 
 function execPythonBypass(url, provider, options = {}) {
     return requestDaemon(url, provider, options).catch((err) => {
+        if (err && err.code === 'CAMOUFOX_UNAVAILABLE') {
+            throw err;
+        }
         console.log(`[SC][${provider}] Daemon non disponibile (${err.message}), fallback a processo singolo...`);
         return execPythonBypassSingle(url, provider, options);
     });
