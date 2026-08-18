@@ -30,7 +30,7 @@ Per installare i provider su Nuvio, basta seguire questi semplici passaggi:
 2.  Vai nelle **Impostazioni** > **Plugin**.
 3.  Incolla il seguente link nel campo apposito per aggiungere un plugin esterno:
     ```text
-    https://raw.githubusercontent.com/realbestia1/easystreams/refs/heads/main/
+    https://raw.githubusercontent.com/realbestia1/easystreams/refs/heads/main/manifest.json
     ```
 4.  I provider saranno immediatamente attivi.
 
