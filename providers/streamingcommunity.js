@@ -573,7 +573,7 @@ function extractEmbedSrcFromApiPayload(payload) {
     return null;
   }
 }
-function extractMasterPlaylistFromEmbedHtml(html) {
+function extractMasterPlaylistFromEmbedHtml(html, preferActiveStream = false) {
   if (!html) return null;
   const tokenMatch = html.match(/'token'\s*:\s*'([^']+)'/i);
   const expiresMatch = html.match(/'expires'\s*:\s*'([^']+)'/i);
@@ -581,10 +581,22 @@ function extractMasterPlaylistFromEmbedHtml(html) {
   if (!tokenMatch || !expiresMatch || !urlMatch) {
     return null;
   }
+  let playlistUrl = urlMatch[1];
+  if (preferActiveStream) {
+    const streamsMatch = html.match(/window\.streams\s*=\s*(\[[\s\S]*?\])\s*;\s*window\.masterPlaylist/i);
+    if (streamsMatch) {
+      try {
+        const streams = JSON.parse(streamsMatch[1]);
+        const selected = streams.find((stream) => (stream == null ? void 0 : stream.active) && (stream == null ? void 0 : stream.url)) || streams.find((stream) => stream == null ? void 0 : stream.url);
+        if (selected == null ? void 0 : selected.url) playlistUrl = selected.url;
+      } catch (_) {
+      }
+    }
+  }
   return {
     token: tokenMatch[1],
     expires: expiresMatch[1],
-    url: urlMatch[1]
+    url: playlistUrl
   };
 }
 function getQualityFromName(qualityStr) {
@@ -750,7 +762,7 @@ function getStreams(id, type, season, episode, providerContext = null) {
           continue;
         }
         if (!embedHtml) continue;
-        const masterPlaylist = extractMasterPlaylistFromEmbedHtml(embedHtml);
+        const masterPlaylist = extractMasterPlaylistFromEmbedHtml(embedHtml, isSczSource);
         if (!masterPlaylist) {
           console.log("[StreamingCommunity] Could not find playlist info in HTML");
           continue;
@@ -762,7 +774,7 @@ function getStreams(id, type, season, episode, providerContext = null) {
           `token=${encodeURIComponent(masterPlaylist.token)}`,
           `expires=${encodeURIComponent(masterPlaylist.expires)}`,
           !isSczSource ? "h=1" : null,
-          "lang=it"
+          !isSczSource ? "lang=it" : null
         ].filter(Boolean);
         const rawStreamUrl = `${urlWithExt}?${queryParts.join("&")}`;
         const streamUrl = rewriteStreamingCommunityHost(rawStreamUrl);
