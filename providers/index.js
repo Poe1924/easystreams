@@ -8065,10 +8065,11 @@ var require_guardoserie = __commonJS({
             if (animeProvider && animeExtId) {
               rawEpisodeNumber = Number.parseInt((animeEpisodeFromId == null ? void 0 : animeEpisodeFromId[1]) || episode || "", 10);
               if (!Number.isInteger(rawEpisodeNumber) || rawEpisodeNumber < 1) rawEpisodeNumber = null;
-              const mapped = yield getIdsFromAnimeProvider(animeProvider, animeExtId, null, 1, providerContext);
+              const mapped = yield getIdsFromAnimeProvider(animeProvider, animeExtId, null, rawEpisodeNumber || 1, providerContext);
               mark("kitsu_mapping_done", { ok: Boolean(mapped && mapped.tmdbId) });
               if (mapped && mapped.tmdbId) {
                 tmdbId = mapped.tmdbId;
+                if (mapped.rawEpisodeNumber) rawEpisodeNumber = mapped.rawEpisodeNumber;
                 console.log(`[Guardoserie] ${animeProvider} ${animeExtId} mapped to TMDB ID ${tmdbId} (abs ep=${rawEpisodeNumber || "n/a"})`);
               } else {
                 console.log(`[Guardoserie] No ${animeProvider}->TMDB mapping found for ${animeExtId}`);
@@ -12945,7 +12946,8 @@ var require_vidxgo2 = __commonJS({
             const mappingLang = getMappingLanguage2(providerContext);
             if (id.toString().startsWith("kitsu:") || contextKitsuId) {
               const kitsuId = contextKitsuId || id.toString().split(":")[1];
-              const mapped = yield getIdsFromMapping2("kitsu", kitsuId, season, episode, mappingLang);
+              const seasonHintForKitsu = providerContext && providerContext.seasonProvided === true ? season : null;
+              const mapped = yield getIdsFromMapping2("kitsu", kitsuId, seasonHintForKitsu, episode, mappingLang);
               mark("kitsu_mapping_done", { ok: Boolean(mapped && mapped.tmdbId) });
               if (mapped) {
                 if (mapped.tmdbId) tmdbId = mapped.tmdbId;
@@ -13329,9 +13331,9 @@ var require_pcc = __commonJS({
         const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?$/i);
         if (anime) {
           const ep = anime[3] || episode || 1;
-          const mapped = yield fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, 1);
+          const mapped = yield fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, ep);
           if (!(mapped == null ? void 0 : mapped.imdbId)) return null;
-          return __spreadProps(__spreadValues({}, mapped), { rawEpisodeNumber: ep });
+          return __spreadProps(__spreadValues({}, mapped), { rawEpisodeNumber: mapped.rawEpisodeNumber || ep });
         }
         if (direct) {
           const mapped = yield fetchAnimeMapping("imdb", direct, season, episode);
@@ -14286,6 +14288,13 @@ function parseCompositeSeriesId(rawId, type, season, episode) {
   };
   const normalizedType = String(type || "").toLowerCase();
   if (normalizedType === "movie") return parsed;
+  const animeEpisodeMatch = parsed.id.match(/^(kitsu|mal|anilist|anidb):(\d+):(\d+)$/i);
+  if (animeEpisodeMatch) {
+    parsed.id = `${animeEpisodeMatch[1]}:${animeEpisodeMatch[2]}`;
+    parsed.season = null;
+    parsed.episode = Number.parseInt(animeEpisodeMatch[3], 10);
+    return parsed;
+  }
   const match = parsed.id.match(/^(tt\d+|\d+|tmdb:\d+|kitsu:\d+|mal:\d+|anilist:\d+|anidb:\d+|tvdb:\d+):(\d+):(\d+)$/i);
   if (!match) return parsed;
   parsed.id = match[1];

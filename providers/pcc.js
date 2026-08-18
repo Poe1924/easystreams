@@ -252,9 +252,9 @@ function resolveImdbId(id, type, season, episode) {
     const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?$/i);
     if (anime) {
       const ep = anime[3] || episode || 1;
-      const mapped = yield fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, 1);
+      const mapped = yield fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, ep);
       if (!(mapped == null ? void 0 : mapped.imdbId)) return null;
-      return __spreadProps(__spreadValues({}, mapped), { rawEpisodeNumber: ep });
+      return __spreadProps(__spreadValues({}, mapped), { rawEpisodeNumber: mapped.rawEpisodeNumber || ep });
     }
     if (direct) {
       const mapped = yield fetchAnimeMapping("imdb", direct, season, episode);

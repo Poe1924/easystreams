@@ -251,7 +251,8 @@ if (!IS_SERVER) {
 
         if (id.toString().startsWith("kitsu:") || contextKitsuId) {
           const kitsuId = contextKitsuId || id.toString().split(":")[1];
-          const mapped = yield getIdsFromMapping("kitsu", kitsuId, season, episode, mappingLang);
+          const seasonHintForKitsu = providerContext && providerContext.seasonProvided === true ? season : null;
+          const mapped = yield getIdsFromMapping("kitsu", kitsuId, seasonHintForKitsu, episode, mappingLang);
           mark("kitsu_mapping_done", { ok: Boolean(mapped && mapped.tmdbId) });
           if (mapped) {
             if (mapped.tmdbId) tmdbId = mapped.tmdbId;
