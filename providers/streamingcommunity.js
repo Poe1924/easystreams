@@ -773,7 +773,7 @@ function getStreams(id, type, season, episode, providerContext = null) {
           existingQuery,
           `token=${encodeURIComponent(masterPlaylist.token)}`,
           `expires=${encodeURIComponent(masterPlaylist.expires)}`,
-          !isSczSource ? "h=1" : null,
+          "h=1",
           !isSczSource ? "lang=it" : null
         ].filter(Boolean);
         const rawStreamUrl = `${urlWithExt}?${queryParts.join("&")}`;
