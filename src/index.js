@@ -173,6 +173,14 @@ function parseCompositeSeriesId(rawId, type, season, episode) {
     const normalizedType = String(type || '').toLowerCase();
     if (normalizedType === 'movie') return parsed;
 
+    const animeEpisodeMatch = parsed.id.match(/^(kitsu|mal|anilist|anidb):(\d+):(\d+)$/i);
+    if (animeEpisodeMatch) {
+        parsed.id = `${animeEpisodeMatch[1]}:${animeEpisodeMatch[2]}`;
+        parsed.season = null;
+        parsed.episode = Number.parseInt(animeEpisodeMatch[3], 10);
+        return parsed;
+    }
+
     const match = parsed.id.match(/^(tt\d+|\d+|tmdb:\d+|kitsu:\d+|mal:\d+|anilist:\d+|anidb:\d+|tvdb:\d+):(\d+):(\d+)$/i);
     if (!match) return parsed;
 

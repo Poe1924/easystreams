@@ -76,9 +76,9 @@ async function resolveImdbId(id, type, season, episode) {
   const anime = raw.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?$/i);
   if (anime) {
     const ep = anime[3] || episode || 1;
-    const mapped = await fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, 1);
+    const mapped = await fetchAnimeMapping(anime[1].toLowerCase(), anime[2], null, ep);
     if (!mapped?.imdbId) return null;
-    return { ...mapped, rawEpisodeNumber: ep };
+    return { ...mapped, rawEpisodeNumber: mapped.rawEpisodeNumber || ep };
   }
 
   if (direct) {

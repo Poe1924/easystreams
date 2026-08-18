@@ -464,10 +464,11 @@ if (!IS_SERVER) {
                 // I provider anime usano episodi assoluti, niente stagioni.
                 rawEpisodeNumber = Number.parseInt(animeEpisodeFromId?.[1] || episode || '', 10);
                 if (!Number.isInteger(rawEpisodeNumber) || rawEpisodeNumber < 1) rawEpisodeNumber = null;
-                const mapped = await getIdsFromAnimeProvider(animeProvider, animeExtId, null, 1, providerContext);
+                const mapped = await getIdsFromAnimeProvider(animeProvider, animeExtId, null, rawEpisodeNumber || 1, providerContext);
                 mark('kitsu_mapping_done', { ok: Boolean(mapped && mapped.tmdbId) });
                 if (mapped && mapped.tmdbId) {
                     tmdbId = mapped.tmdbId;
+                    if (mapped.rawEpisodeNumber) rawEpisodeNumber = mapped.rawEpisodeNumber;
                     console.log(`[Guardoserie] ${animeProvider} ${animeExtId} mapped to TMDB ID ${tmdbId} (abs ep=${rawEpisodeNumber || 'n/a'})`);
                 } else {
                     console.log(`[Guardoserie] No ${animeProvider}->TMDB mapping found for ${animeExtId}`);
