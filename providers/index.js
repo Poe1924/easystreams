@@ -8610,11 +8610,15 @@ var require_streamingcommunity = __commonJS({
       };
     }
     function getPlaylistHeaders(embedUrl) {
-      const cleanReferer = rewriteStreamingCommunityHost(embedUrl);
+      let origin = getStreamingCommunityBaseUrl();
+      try {
+        origin = new URL(embedUrl).origin;
+      } catch (_) {
+      }
       return {
         "User-Agent": USER_AGENT,
-        "Referer": cleanReferer,
-        "Origin": getStreamingCommunityBaseUrl(),
+        "Referer": embedUrl,
+        "Origin": origin,
         "Accept": "*/*",
         "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
         "Sec-Fetch-Dest": "empty",
@@ -8823,23 +8827,20 @@ var require_streamingcommunity = __commonJS({
               continue;
             }
             if (!embedHtml) continue;
-            const masterPlaylist = extractMasterPlaylistFromEmbedHtml(embedHtml, isSczSource);
+            const masterPlaylist = extractMasterPlaylistFromEmbedHtml(embedHtml);
             if (!masterPlaylist) {
               console.log("[StreamingCommunity] Could not find playlist info in HTML");
               continue;
             }
-            const [playlistRawUrl, existingQuery] = masterPlaylist.url.split("?");
-            const urlWithExt = playlistRawUrl.endsWith(".m3u8") ? playlistRawUrl : `${playlistRawUrl}.m3u8`;
-            const queryParts = [
-              existingQuery,
-              `token=${encodeURIComponent(masterPlaylist.token)}`,
-              `expires=${encodeURIComponent(masterPlaylist.expires)}`,
-              "h=1",
-              !isSczSource ? "lang=it" : null
-            ].filter(Boolean);
-            const rawStreamUrl = `${urlWithExt}?${queryParts.join("&")}`;
-            const streamUrl = rewriteStreamingCommunityHost(rawStreamUrl);
-            const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
+            const playlistUrl = new URL(masterPlaylist.url);
+            playlistUrl.searchParams.append("token", masterPlaylist.token);
+            playlistUrl.searchParams.append("expires", masterPlaylist.expires);
+            const embedParams = new URL(embedUrl).searchParams;
+            if (embedParams.get("canPlayFHD")) playlistUrl.searchParams.append("h", "1");
+            if (embedParams.get("scz")) playlistUrl.searchParams.append("scz", "1");
+            playlistUrl.searchParams.append("lang", embedParams.get("lang") || "en");
+            const streamUrl = playlistUrl.toString();
+            const cleanEmbedUrl = embedUrl;
             const cleanIframeUrl = rewriteStreamingCommunityHost(item.iframeUrl || cleanEmbedUrl);
             const streamHeaders = getPlaylistHeaders(cleanEmbedUrl);
             console.log(`[StreamingCommunity] Final stream URL (${item.source}): ${streamUrl}`);

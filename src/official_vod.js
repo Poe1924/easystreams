@@ -80,6 +80,33 @@ function parseYear(value) {
   return match ? Number(match[0]) : null;
 }
 
+function parseDate(value) {
+  const text = String(value || '');
+  const iso = text.match(/\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const numeric = text.match(/\b(\d{1,2})[/-](\d{1,2})[/-]((?:19|20)\d{2})\b/);
+  if (numeric) return `${numeric[3]}-${numeric[2].padStart(2, '0')}-${numeric[1].padStart(2, '0')}`;
+  const months = {
+    gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6,
+    luglio: 7, agosto: 8, settembre: 9, ottobre: 10, novembre: 11, dicembre: 12
+  };
+  const named = text.match(/\b(\d{1,2})(?:°|º)?\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+((?:19|20)\d{2})\b/i);
+  if (!named) return '';
+  return `${named[3]}-${String(months[named[2].toLowerCase()]).padStart(2, '0')}-${named[1].padStart(2, '0')}`;
+}
+
+async function fetchImdbMetadata(imdbId) {
+  const payload = await fetchJson(`https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(imdbId)}.json`);
+  const item = Array.isArray(payload && payload.d)
+    ? payload.d.find((entry) => String(entry && entry.id || '').toLowerCase() === String(imdbId).toLowerCase())
+    : null;
+  if (!item || item.qid !== 'tvSeries' || !item.l) return null;
+  return {
+    title: item.l,
+    year: Number.isInteger(Number(item.y)) ? Number(item.y) : parseYear(item.tl)
+  };
+}
+
 function parseMediasetYear(entry) {
   const explicit = entry['mediasetprogram$productionYear'];
   if (explicit) return parseYear(explicit);
@@ -190,12 +217,19 @@ function titleIdentityScore(leftTitles, rightTitle) {
   )));
 }
 
+function hasSharedDistinctiveTitleToken(left, right) {
+  const leftTokens = new Set(normalizeTitle(left).split(' ').filter((token) => token.length >= 5));
+  return normalizeTitle(right).split(' ').some((token) => token.length >= 5 && leftTokens.has(token));
+}
+
 function isStrongOfficialSeriesIdentity(target, candidate) {
   const targetTitles = [target.title, target.originalTitle];
-  if (titleIdentityScore(
+  const identityScore = titleIdentityScore(
     targetTitles,
     candidate.seriesTitle || candidate.title
-  ) < 0.72) return false;
+  );
+  const yearMatch = target.year && candidate.year && Math.abs(target.year - candidate.year) <= 1;
+  if (identityScore < 0.72 && !(yearMatch && hasSharedDistinctiveTitleToken(target.title, candidate.seriesTitle || candidate.title))) return false;
   try {
     const url = new URL(candidate.pageUrl);
     if (url.hostname.endsWith('wittytv.it')) {
@@ -250,31 +284,57 @@ async function resolveTarget(id, type, season, episode, context = {}) {
   if (!imdbId && /^tt\d+$/i.test(rawId)) imdbId = rawId;
 
   if (!tmdbId && imdbId) {
-    const found = await fetchJson(`https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}?api_key=${TMDB_API_KEY}&external_source=imdb_id&language=it-IT`);
-    const values = normalizedType === 'movie' ? found.movie_results : found.tv_results;
-    tmdbId = values && values[0] ? String(values[0].id) : null;
+    try {
+      const found = await fetchJson(`https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}?api_key=${TMDB_API_KEY}&external_source=imdb_id&language=it-IT`);
+      const values = normalizedType === 'movie' ? found.movie_results : found.tv_results;
+      tmdbId = values && values[0] ? String(values[0].id) : null;
+    } catch (error) {
+      debug(`TMDB IMDb lookup failed for ${imdbId}`, error);
+    }
   }
-  if (!tmdbId) return null;
 
   const endpoint = normalizedType === 'movie' ? 'movie' : 'tv';
-  const meta = await fetchJson(`https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=it-IT`);
+  let meta = null;
+  if (tmdbId) {
+    try {
+      meta = await fetchJson(`https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=it-IT`);
+    } catch (error) {
+      debug(`TMDB metadata lookup failed for ${tmdbId}`, error);
+    }
+  }
+  let imdbMeta = null;
+  if (!meta && imdbId) {
+    try {
+      imdbMeta = await fetchImdbMetadata(imdbId);
+    } catch (error) {
+      debug(`IMDb metadata lookup failed for ${imdbId}`, error);
+    }
+  }
+  if (!meta && !imdbMeta) return null;
+
   const target = {
     type: normalizedType,
-    title: meta.title || meta.name || '',
-    originalTitle: meta.original_title || meta.original_name || '',
-    year: parseYear(meta.release_date || meta.first_air_date),
+    title: (meta && (meta.title || meta.name)) || (imdbMeta && imdbMeta.title) || '',
+    originalTitle: (meta && (meta.original_title || meta.original_name || meta.name)) || (imdbMeta && imdbMeta.title) || '',
+    year: parseYear(meta && (meta.release_date || meta.first_air_date || meta.released || meta.releaseInfo || meta.year)) || (imdbMeta && imdbMeta.year) || null,
     tmdbId,
     imdbId,
     season: normalizedType === 'series' ? positiveInt(season) : null,
     episode: normalizedType === 'series' ? positiveInt(episode) : null,
-    episodeTitle: null
+    episodeTitle: null,
+    episodeDate: null,
+    episodeMetadataAvailable: normalizedType === 'series'
+      && positiveInt(season) != null
+      && positiveInt(episode) != null
+      && Boolean(tmdbId || imdbId)
   };
-  if (normalizedType === 'series' && target.season != null && target.episode != null) {
+  if (normalizedType === 'series' && tmdbId && target.season != null && target.episode != null) {
     try {
       const detail = await fetchJson(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${target.season}/episode/${target.episode}?api_key=${TMDB_API_KEY}&language=it-IT`);
       target.episodeTitle = detail.name || null;
+      target.episodeDate = parseDate(detail.air_date || detail.release_date) || null;
     } catch {
-      // Series title, season and episode still provide a deterministic match.
+      // Keep strict episode matching when TMDB cannot describe the requested episode.
     }
   }
   return target;
@@ -326,23 +386,121 @@ function deduplicate(items) {
   return [...map.values()];
 }
 
+function raiSetYear(block, set) {
+  return parseYear(`${block && block.name || ''} ${set && set.name || ''}`);
+}
+
+function buildRaiFallback(program, target, seriesTitle, programYear) {
+  if (!isStrongOfficialSeriesIdentity(target, { seriesTitle, year: programYear })) return null;
+  const hasDatedSet = (program.blocks || []).some((block) =>
+    (block.sets || []).some((set) =>
+      !/clip|extra|trailer|promo/i.test(`${block.name || ''} ${set.name || ''}`)
+      && raiSetYear(block, set) != null
+    )
+  );
+  return {
+    matchMode: hasDatedSet ? 'year' : 'single',
+    seasonBaseYear: target.year || programYear || 0,
+    mapRequestNumbers: true,
+    allowAnyEpisode: !target.episodeMetadataAvailable
+  };
+}
+
+function selectRaiSets(program, target) {
+  const sets = [];
+  for (const block of program.blocks || []) {
+    if (block.type !== 'RaiPlay Multimedia Block') continue;
+    for (const set of block.sets || []) {
+      if (/clip|extra|trailer|promo/i.test(`${block.name || ''} ${set.name || ''}`)) continue;
+      sets.push({ block, set, year: raiSetYear(block, set) });
+    }
+  }
+
+  if (target.episodeMetadataAvailable && (target.episodeTitle || target.episodeDate)) return sets;
+
+  const numericMatches = sets.filter(({ set }) => firstNumber(set.name) === Number(target.season));
+  if (numericMatches.length) return numericMatches.slice(0, 3);
+
+  const fallback = target.raiFallback;
+  if (!fallback) return [];
+  if (fallback.matchMode === 'single') return sets.slice(0, 3);
+
+  const dated = sets.filter((entry) => entry.year != null);
+  if (!dated.length) return sets.slice(0, 3);
+  const desiredYear = parseYear(target.episodeDate)
+    || fallback.seasonBaseYear + Math.max(0, Number(target.season || 1) - 1);
+  return dated
+    .sort((left, right) => Math.abs(left.year - desiredYear) - Math.abs(right.year - desiredYear) || right.year - left.year)
+    .slice(0, 3);
+}
+
+function collectRaiVideos(payload) {
+  const videos = [];
+  walk(payload, (item) => {
+    if (item && item.video_url) videos.push(item);
+  });
+  return [...new Map(videos.map((item) => [item.id || item.path_id || item.video_url, item])).values()];
+}
+
+function raiVideoDate(video) {
+  return parseDate(`${video.toptitle || ''} ${video.name || ''} ${video.path_id || ''} ${video.date || ''} ${video.publish_date || ''} ${video.published || ''}`);
+}
+
+function selectRaiVideos(videos, target) {
+  const ordered = videos
+    .map((video, index) => ({ video, index, date: raiVideoDate(video) }))
+    .sort((left, right) => {
+      if (left.date && right.date && left.date !== right.date) return left.date.localeCompare(right.date);
+      return left.index - right.index;
+    })
+    .map(({ video }) => video);
+
+  if (target.episodeDate) {
+    const dateMatches = ordered.filter((video) => raiVideoDate(video) === target.episodeDate);
+    if (dateMatches.length) return dateMatches.slice(0, 1);
+  }
+  if (target.episodeTitle) {
+    const titleMatches = ordered.filter((video) => titleIdentityScore(
+      [target.episodeTitle],
+      video.episode_title || video.toptitle || video.name
+    ) >= 0.72);
+    if (titleMatches.length) return titleMatches.slice(0, 1);
+  }
+  if (target.episode == null) return ordered.slice(0, 1);
+
+  if (target.episodeMetadataAvailable) return [];
+  const explicit = ordered.filter((video) => positiveInt(video.episode) === Number(target.episode));
+  if (explicit.length) return explicit.slice(0, 1);
+  if (ordered[Number(target.episode) - 1]) return [ordered[Number(target.episode) - 1]];
+  if (target.raiFallback && target.raiFallback.allowAnyEpisode && ordered.length) return [ordered[0]];
+  return [];
+}
+
+function applyRaiRequestNumbers(candidate, target) {
+  if (!target.raiFallback || !target.raiFallback.mapRequestNumbers) return candidate;
+  if (target.season != null) candidate.season = target.season;
+  if (target.episode != null) candidate.episode = target.episode;
+  if (!candidate.isClip) candidate.isFullEpisode = true;
+  return candidate;
+}
+
 async function searchRai(query, target) {
   const cacheKey = `rai:${normalizeTitle(query)}:${target.type}:${target.season}:${target.episode}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
   const data = await fetchJson(RAI_SEARCH_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      origin: RAI_ORIGIN,
-      referer: `${RAI_ORIGIN}/`
-    },
-    body: JSON.stringify({
-      templateIn: '6470a982e4e0301afe1f81f1',
-      templateOut: '6516ac5d40da6c377b151642',
-      params: { param: query, from: null, sort: 'relevance', onlyVideoQuery: false }
-    })
-  });
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: RAI_ORIGIN,
+        referer: `${RAI_ORIGIN}/`
+      },
+      body: JSON.stringify({
+        templateIn: '6470a982e4e0301afe1f81f1',
+        templateOut: '6516ac5d40da6c377b151642',
+        params: { param: query, from: null, sort: 'relevance', onlyVideoQuery: false }
+      })
+    });
   const cards = (data && data.agg && data.agg.titoli && data.agg.titoli.cards || [])
     .filter((item) => /^\/(?:programmi|collezioni)\/.+\.json$/i.test(String(item.path_id || '')))
     .slice(0, 8);
@@ -372,28 +530,21 @@ async function expandRaiProgram(card, target) {
     const candidate = normalizeRaiVideo(video, seriesTitle, year, 'movie');
     return candidate ? [candidate] : [];
   }
-  const matchingSets = [];
-  for (const block of program.blocks || []) {
-    if (block.type !== 'RaiPlay Multimedia Block' || /clip|extra|trailer|promo/i.test(String(block.name || ''))) continue;
-    for (const set of block.sets || []) {
-      if (firstNumber(set.name) === Number(target.season)) matchingSets.push({ block, set });
-    }
-  }
+  const raiFallback = target.raiFallback || buildRaiFallback(program, target, seriesTitle, year);
+  const effectiveTarget = raiFallback ? { ...target, raiFallback } : target;
+  const matchingSets = selectRaiSets(program, effectiveTarget);
   const result = [];
-  for (const { block, set } of matchingSets.slice(0, 3)) {
+  for (const { block, set, year: setYear } of matchingSets) {
     const base = String(card.path_id).replace(/\.json$/i, '');
     const payload = await raiJson(`${base}/${encodeURIComponent(block.id)}/${encodeURIComponent(set.id)}/episodes.json`);
-    const cardsFound = [];
-    walk(payload, (item) => {
-      if (item && item.video_url && Number(item.episode) === Number(target.episode)) cardsFound.push(item);
-    });
+    const cardsFound = selectRaiVideos(collectRaiVideos(payload), effectiveTarget);
     for (const item of cardsFound) {
       let detail = item;
       if (item.path_id) {
         try { detail = { ...item, ...await raiJson(item.path_id) }; } catch { }
       }
-      const candidate = normalizeRaiVideo(detail, seriesTitle, year, 'series');
-      if (candidate) result.push(candidate);
+      const candidate = normalizeRaiVideo(detail, seriesTitle, setYear || year, 'series');
+      if (candidate) result.push(applyRaiRequestNumbers(candidate, effectiveTarget));
     }
   }
   return result;
@@ -416,10 +567,11 @@ function normalizeRaiVideo(video, seriesTitle, year, targetType) {
     seriesTitle,
     episodeTitle,
     year,
+    airDate: raiVideoDate(video),
     season: positiveInt(video.season),
     episode: positiveInt(video.episode),
     isClip: /clip|extra|trailer|promo|backstage/i.test(`${video.forma || ''} ${video.type || ''} ${video.name || ''}`) || (duration > 0 && duration < 600),
-    isFullEpisode: targetType === 'series' && Number(video.episode) > 0 && duration >= 600,
+    isFullEpisode: targetType === 'series' && duration >= 600,
     subtitles: normalizeRaiSubtitles((video.video && (video.video.subtitlesArray || video.video.subtitleList)) || video.subtitlesArray || video.subtitleList)
   };
 }
@@ -1019,6 +1171,13 @@ async function getOfficialStreams(provider, id, type, season, episode, context =
           matchingEpisodeBlock !== true
           && candidate.episode != null
           && Number(candidate.episode) !== Number(target.episode)
+        ) return false;
+        if (
+          provider === 'raiplay'
+          && target.episodeMetadataAvailable
+          && target.episodeDate
+          && candidate.airDate
+          && candidate.airDate !== target.episodeDate
         ) return false;
         if (candidate.source === 'witty' && candidate.isFullEpisode !== true) return false;
         return true;
