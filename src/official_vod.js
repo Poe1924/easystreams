@@ -451,6 +451,8 @@ function selectRaiSets(program, target) {
     }
   }
 
+  if (target.episodeMetadataAvailable && (target.episodeTitle || target.episodeDate)) return sets;
+
   const numericMatches = sets.filter(({ set }) => firstNumber(set.name) === Number(target.season));
   if (numericMatches.length) return numericMatches.slice(0, 3);
 
