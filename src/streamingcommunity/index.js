@@ -499,8 +499,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       if (embedParams.get('canPlayFHD')) playlistUrl.searchParams.append('h', '1');
       if (embedParams.get('scz')) playlistUrl.searchParams.append('scz', '1');
       playlistUrl.searchParams.append('lang', embedParams.get('lang') || 'en');
-      const streamUrl = playlistUrl.toString();
-      const cleanEmbedUrl = embedUrl;
+      const streamUrl = rewriteStreamingCommunityHost(playlistUrl.toString());
+      const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
       const cleanIframeUrl = rewriteStreamingCommunityHost(item.iframeUrl || cleanEmbedUrl);
       const streamHeaders = getPlaylistHeaders(cleanEmbedUrl);
       console.log(`[StreamingCommunity] Final stream URL (${item.source}): ${streamUrl}`);
