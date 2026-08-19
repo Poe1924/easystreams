@@ -4,7 +4,6 @@ const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139 Safari/537.36';
 const MEDIASET_ORIGIN = 'https://mediasetinfinity.mediaset.it';
 const RAI_ORIGIN = 'https://www.raiplay.it';
-const EASYCATALOGS_ORIGIN = 'https://easycatalogs.realbestia.com';
 const RAI_SEARCH_URL = `${RAI_ORIGIN}/atomatic/raiplay-search-service/api/v1/msearch`;
 const RAI_RELINKER = 'https://mediapolisvod.rai.it/relinker/relinkerServlet.htm';
 const MEDIASET_GRAPHQL = 'https://mediasetplay.api-graph.mediaset.it/';
@@ -106,22 +105,6 @@ async function fetchImdbMetadata(imdbId) {
     title: item.l,
     year: Number.isInteger(Number(item.y)) ? Number(item.y) : parseYear(item.tl)
   };
-}
-
-async function fetchEasyCatalogMetadata(lookupId, type) {
-  const endpointType = type === 'movie' ? 'movie' : 'series';
-  const rawId = String(lookupId || '').trim();
-  const catalogId = /^tt\d+$/i.test(rawId)
-    ? rawId
-    : `tmdb:${rawId.replace(/^tmdb:/i, '')}`;
-  if (!/^tt\d+$/i.test(catalogId) && !/^tmdb:\d+$/i.test(catalogId)) return null;
-  const cacheKey = `easycatalogs:${endpointType}:${catalogId}`;
-  const cached = cacheGet(cacheKey);
-  if (cached) return cached;
-  const payload = await fetchJson(`${EASYCATALOGS_ORIGIN}/meta/${endpointType}/${encodeURIComponent(catalogId)}.json`);
-  const metadata = payload && payload.meta && typeof payload.meta === 'object' ? payload.meta : payload;
-  if (!metadata || typeof metadata !== 'object' || !metadata.name) return null;
-  return cacheSet(cacheKey, metadata, 6 * 60 * 60 * 1000);
 }
 
 function parseMediasetYear(entry) {
@@ -319,57 +302,39 @@ async function resolveTarget(id, type, season, episode, context = {}) {
       debug(`TMDB metadata lookup failed for ${tmdbId}`, error);
     }
   }
-  let catalogMeta = null;
-  const catalogLookupId = imdbId || (tmdbId ? `tmdb:${tmdbId}` : null);
-  if (catalogLookupId) {
-    try {
-      catalogMeta = await fetchEasyCatalogMetadata(catalogLookupId, normalizedType);
-      if (!imdbId && catalogMeta && /^tt\d+$/i.test(String(catalogMeta.id || ''))) {
-        imdbId = String(catalogMeta.id);
-      }
-    } catch (error) {
-      debug(`Easy Catalogs metadata lookup failed for ${catalogLookupId}`, error);
-    }
-  }
   let imdbMeta = null;
-  if (!meta && !catalogMeta && imdbId) {
+  if (!meta && imdbId) {
     try {
       imdbMeta = await fetchImdbMetadata(imdbId);
     } catch (error) {
       debug(`IMDb metadata lookup failed for ${imdbId}`, error);
     }
   }
-  if (!meta && !catalogMeta && !imdbMeta) return null;
-
-  const catalogSource = meta || catalogMeta;
-  const catalogVideos = catalogMeta && Array.isArray(catalogMeta.videos) ? catalogMeta.videos : [];
-  const catalogEpisode = normalizedType === 'series'
-    ? catalogVideos.find((video) =>
-      positiveInt(video.season) === positiveInt(season)
-      && positiveInt(video.episode) === positiveInt(episode)
-    )
-    : null;
+  if (!meta && !imdbMeta) return null;
 
   const target = {
     type: normalizedType,
-    title: (catalogSource && (catalogSource.title || catalogSource.name)) || (imdbMeta && imdbMeta.title) || '',
-    originalTitle: (catalogSource && (catalogSource.original_title || catalogSource.original_name || catalogSource.name)) || (imdbMeta && imdbMeta.title) || '',
-    year: parseYear(catalogSource && (catalogSource.release_date || catalogSource.first_air_date || catalogSource.released || catalogSource.releaseInfo || catalogSource.year)) || (imdbMeta && imdbMeta.year) || null,
+    title: (meta && (meta.title || meta.name)) || (imdbMeta && imdbMeta.title) || '',
+    originalTitle: (meta && (meta.original_title || meta.original_name || meta.name)) || (imdbMeta && imdbMeta.title) || '',
+    year: parseYear(meta && (meta.release_date || meta.first_air_date || meta.released || meta.releaseInfo || meta.year)) || (imdbMeta && imdbMeta.year) || null,
     tmdbId,
     imdbId,
     season: normalizedType === 'series' ? positiveInt(season) : null,
     episode: normalizedType === 'series' ? positiveInt(episode) : null,
-    episodeTitle: catalogEpisode && (catalogEpisode.title || catalogEpisode.name) || null,
-    episodeDate: catalogEpisode && parseDate(catalogEpisode.released || catalogEpisode.firstAired || catalogEpisode.airDate) || null,
-    episodeMetadataAvailable: normalizedType === 'series' && Boolean(catalogMeta && Array.isArray(catalogMeta.videos))
+    episodeTitle: null,
+    episodeDate: null,
+    episodeMetadataAvailable: normalizedType === 'series'
+      && positiveInt(season) != null
+      && positiveInt(episode) != null
+      && Boolean(tmdbId || imdbId)
   };
   if (normalizedType === 'series' && tmdbId && target.season != null && target.episode != null) {
     try {
       const detail = await fetchJson(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${target.season}/episode/${target.episode}?api_key=${TMDB_API_KEY}&language=it-IT`);
-      target.episodeTitle = target.episodeTitle || detail.name || target.episodeTitle;
-      target.episodeDate = target.episodeDate || parseDate(detail.air_date || detail.release_date);
+      target.episodeTitle = detail.name || null;
+      target.episodeDate = parseDate(detail.air_date || detail.release_date) || null;
     } catch {
-      // Series title, season and episode still provide a deterministic match.
+      // Keep strict episode matching when TMDB cannot describe the requested episode.
     }
   }
   return target;
