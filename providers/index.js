@@ -13714,8 +13714,12 @@ var require_cc = __commonJS({
           return { imdbId, html };
         } catch (e) {
           const status = getHttpStatusFromError(e);
-          if (status !== 403 && status !== 503 && !isCloudflareBlockedError(e)) {
-            console.error(`[CinemaCity] IMDb check error for ${candidateUrl}:`, e);
+          const message = (e == null ? void 0 : e.message) || String(e);
+          const isTimeout = (e == null ? void 0 : e.name) === "TimeoutError" || (e == null ? void 0 : e.name) === "AbortError" || /timed out|aborted due to timeout/i.test(message);
+          if (isTimeout) {
+            console.warn(`[CinemaCity] IMDb check timeout for ${candidateUrl}`);
+          } else if (status !== 403 && status !== 503 && !isCloudflareBlockedError(e)) {
+            console.error(`[CinemaCity] IMDb check error for ${candidateUrl}: ${message}`);
           }
           return null;
         }
