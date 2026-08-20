@@ -1,7 +1,7 @@
 const { USER_AGENT } = require('./common');
 const { checkQualityFromPlaylist } = require('../quality_helper.js');
 
-const VIXSRC_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json';
+const VIXSRC_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json';
 const VIXSRC_DEFAULT_BASE_URL = 'https://dancingmonkeyvideolover.xyz';
 const VIXSRC_BASE_URL_OVERRIDE = String(
     (typeof process !== 'undefined' && process.env && process.env.VIXSRC_BASE_URL) || ''

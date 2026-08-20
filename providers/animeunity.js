@@ -610,7 +610,7 @@ var require_vixcloud = __commonJS({
   "src/extractors/vixcloud.js"(exports2, module2) {
     var { USER_AGENT: USER_AGENT2 } = require_common();
     var { checkQualityFromPlaylist: checkQualityFromPlaylist2 } = require_quality_helper();
-    var VIXSRC_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+    var VIXSRC_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
     var VIXSRC_DEFAULT_BASE_URL = "https://dancingmonkeyvideolover.xyz";
     var VIXSRC_BASE_URL_OVERRIDE = String(
       typeof process !== "undefined" && process.env && process.env.VIXSRC_BASE_URL || ""

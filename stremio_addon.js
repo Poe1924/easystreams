@@ -69,7 +69,7 @@ console.error = (...args) => originalConsoleError(...sanitizeLogArgs(args));
 // flareManager removed in favor of Scrapling
 
 const { getClearance, getStats: getFlareStats } = require('./cf_bypass');
-const GUARDOSERIE_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json';
+const GUARDOSERIE_CONFIG_URL = 'https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json';
 
 async function getGuardoserieBaseUrl() {
     const response = await fetch(GUARDOSERIE_CONFIG_URL, { headers: { Accept: 'application/json' } });
