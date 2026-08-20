@@ -7908,7 +7908,7 @@ var require_guardoserie = __commonJS({
       const { USER_AGENT, getProxiedUrl } = require_common();
       const { extractLoadm } = require_loadm();
       const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
-      const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+      const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
       let guardoserieBaseUrl = null;
       let guardoserieConfigLoaded = false;
       function loadGuardoserieBaseUrl() {
@@ -8368,7 +8368,7 @@ var require_guardoserie = __commonJS({
 // src/streamingcommunity/index.js
 var require_streamingcommunity = __commonJS({
   "src/streamingcommunity/index.js"(exports2, module2) {
-    var STREAMINGCOMMUNITY_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+    var STREAMINGCOMMUNITY_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
     var STREAMINGCOMMUNITY_DEFAULT_BASE_URL = "https://dancingmonkeyvideolover.xyz";
     var STREAMINGCOMMUNITY_BASE_URL_OVERRIDE = String(
       typeof process !== "undefined" && process.env && process.env.STREAMINGCOMMUNITY_BASE_URL || ""
@@ -9289,7 +9289,7 @@ var require_vixcloud = __commonJS({
   "src/extractors/vixcloud.js"(exports2, module2) {
     var { USER_AGENT } = require_common();
     var { checkQualityFromPlaylist } = require_quality_helper();
-    var VIXSRC_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+    var VIXSRC_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
     var VIXSRC_DEFAULT_BASE_URL = "https://dancingmonkeyvideolover.xyz";
     var VIXSRC_BASE_URL_OVERRIDE = String(
       typeof process !== "undefined" && process.env && process.env.VIXSRC_BASE_URL || ""

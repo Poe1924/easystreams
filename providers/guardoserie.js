@@ -7906,7 +7906,7 @@ if (!IS_SERVER) {
   const { USER_AGENT, getProxiedUrl } = require_common();
   const { extractLoadm } = require_loadm();
   const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
-  const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+  const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
   let guardoserieBaseUrl = null;
   let guardoserieConfigLoaded = false;
   function loadGuardoserieBaseUrl() {

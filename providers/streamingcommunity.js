@@ -307,7 +307,7 @@ var require_quality_helper = __commonJS({
 });
 
 // src/streamingcommunity/index.js
-var STREAMINGCOMMUNITY_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/damains/refs/heads/main/damains.json";
+var STREAMINGCOMMUNITY_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
 var STREAMINGCOMMUNITY_DEFAULT_BASE_URL = "https://dancingmonkeyvideolover.xyz";
 var STREAMINGCOMMUNITY_BASE_URL_OVERRIDE = String(
   typeof process !== "undefined" && process.env && process.env.STREAMINGCOMMUNITY_BASE_URL || ""
