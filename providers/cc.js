@@ -535,7 +535,7 @@ function verifyCandidateImdb(candidateUrl, expectedImdbId) {
       if (imdbId) {
         console.log(`[CinemaCity] IMDb check ${candidateUrl}: ${imdbId}`);
       }
-      return imdbId;
+      return { imdbId, html };
     } catch (e) {
       const status = getHttpStatusFromError(e);
       if (status !== 403 && status !== 503 && !isCloudflareBlockedError(e)) {
@@ -594,12 +594,14 @@ function searchBySitemap(id, providerType, providerContext = null) {
       ranked.sort((a, b) => b.score - a.score);
       const candidatesToVerify = ranked.slice(0, 3);
       for (const candidate of candidatesToVerify) {
-        const candidateImdbId = yield verifyCandidateImdb(candidate.entry.url, expectedImdbId);
+        const verification = yield verifyCandidateImdb(candidate.entry.url, expectedImdbId);
+        const candidateImdbId = (verification == null ? void 0 : verification.imdbId) || null;
         if (candidateImdbId === expectedImdbId) {
           console.log(`[CinemaCity] Sitemap IMDb verified: ${expectedTitles[0]} -> ${candidate.entry.url}`);
           return {
             url: candidate.entry.url,
-            title: expectedTitles[0] || candidate.entry.title
+            title: expectedTitles[0] || candidate.entry.title,
+            html: verification.html
           };
         }
         if (candidateImdbId && candidateImdbId !== expectedImdbId) {
@@ -866,12 +868,14 @@ function getStreams(id, type, season, episode, providerContext = null) {
       const movieUrl = searchResult.url;
       const movieTitle = (searchResult.title || imdbId).replace(/\s*\(.*?\)\s*/g, "").trim();
       const title = type === "tv" || type === "series" ? `${movieTitle} ${season}x${episode}` : movieTitle;
-      let html;
-      try {
-        html = yield fetchViaWorker(movieUrl);
-      } catch (e) {
-        console.warn(`[CinemaCity] Worker fetch failed: ${e.message}`);
-        return [];
+      let html = typeof searchResult.html === "string" ? searchResult.html : null;
+      if (!html) {
+        try {
+          html = yield fetchViaWorker(movieUrl);
+        } catch (e) {
+          console.warn(`[CinemaCity] Worker fetch failed: ${e.message}`);
+          return [];
+        }
       }
       if (html.length < 500 || html.includes("Just a moment") || html.includes("admin") && html.includes("Unlimited")) {
         console.warn(`[CinemaCity] Page blocked or empty (${html.length} chars)`);
