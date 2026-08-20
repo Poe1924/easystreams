@@ -788,25 +788,9 @@ function checkStreamUrl(url) {
         timeout: STREAM_CHECK_TIMEOUT,
         headers
       });
-      if (response.ok) return true;
-      if (response.status !== 405 && response.status !== 501) return false;
+      return response.status !== 403;
     } catch (e) {
-      return false;
-    }
-    try {
-      const response = yield fetchWithTimeout(url, {
-        method: "GET",
-        timeout: STREAM_CHECK_TIMEOUT,
-        headers: __spreadProps(__spreadValues({}, headers), { Range: "bytes=0-1" })
-      });
-      const isAvailable = response.ok;
-      if (response.body && typeof response.body.cancel === "function") {
-        yield response.body.cancel().catch(() => {
-        });
-      }
-      return isAvailable;
-    } catch (e) {
-      return false;
+      return true;
     }
   });
 }

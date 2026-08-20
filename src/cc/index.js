@@ -577,25 +577,10 @@ async function checkStreamUrl(url) {
             timeout: STREAM_CHECK_TIMEOUT,
             headers
         });
-        if (response.ok) return true;
-        if (response.status !== 405 && response.status !== 501) return false;
+        return response.status !== 403;
     } catch (e) {
-        return false;
-    }
-
-    try {
-        const response = await fetchWithTimeout(url, {
-            method: 'GET',
-            timeout: STREAM_CHECK_TIMEOUT,
-            headers: { ...headers, Range: 'bytes=0-1' }
-        });
-        const isAvailable = response.ok;
-        if (response.body && typeof response.body.cancel === 'function') {
-            await response.body.cancel().catch(() => {});
-        }
-        return isAvailable;
-    } catch (e) {
-        return false;
+        // A slow/unreachable pre-check must not hide an otherwise playable stream.
+        return true;
     }
 }
 
