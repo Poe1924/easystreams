@@ -508,14 +508,20 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         continue;
       }
 
-      const playlistUrl = new URL(masterPlaylist.url);
-      playlistUrl.searchParams.append('token', masterPlaylist.token);
-      playlistUrl.searchParams.append('expires', masterPlaylist.expires);
       const embedParams = new URL(embedUrl).searchParams;
-      if (embedParams.get('canPlayFHD')) playlistUrl.searchParams.append('h', '1');
-      if (embedParams.get('scz')) playlistUrl.searchParams.append('scz', '1');
-      playlistUrl.searchParams.append('lang', embedParams.get('lang') || 'en');
-      const streamUrl = rewriteStreamingCommunityHost(playlistUrl.toString());
+      const playlistParams = [
+        ['token', masterPlaylist.token],
+        ['expires', masterPlaylist.expires],
+        ...(embedParams.get('canPlayFHD') ? [['h', '1']] : []),
+        ...(embedParams.get('scz') ? [['scz', '1']] : []),
+        ['lang', embedParams.get('lang') || 'en']
+      ];
+      const playlistSeparator = masterPlaylist.url.includes('?') ? '&' : '?';
+      const streamUrl = rewriteStreamingCommunityHost(
+        `${masterPlaylist.url}${playlistSeparator}${playlistParams
+          .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+          .join('&')}`
+      );
       const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
       const cleanIframeUrl = rewriteStreamingCommunityHost(item.iframeUrl || cleanEmbedUrl);
       const streamHeaders = getPlaylistHeaders(embedUrl);
