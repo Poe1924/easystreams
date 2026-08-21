@@ -8626,6 +8626,15 @@ var require_streamingcommunity = __commonJS({
         "Sec-Fetch-Site": "same-origin"
       };
     }
+    function getResponseCookies(response) {
+      var _a, _b, _c;
+      try {
+        const cookies = typeof ((_a = response.headers) == null ? void 0 : _a.getSetCookie) === "function" ? response.headers.getSetCookie() : [(_c = (_b = response.headers) == null ? void 0 : _b.get) == null ? void 0 : _c.call(_b, "set-cookie")].filter(Boolean);
+        return cookies.map((value) => String(value).split(";", 1)[0]).filter(Boolean).join("; ");
+      } catch (_) {
+        return "";
+      }
+    }
     function rewriteStreamingCommunityHost(value) {
       return String(value || "").replace(/vixcloud\.co/gi, streamingCommunityMediaHost).replace(/vixsrc\.to/gi, streamingCommunityMediaHost);
     }
@@ -8811,6 +8820,7 @@ var require_streamingcommunity = __commonJS({
             const embedUrl = item.embedUrl;
             const isSczSource = item.source === "scz";
             let embedHtml;
+            let embedCookies = "";
             try {
               console.log(`[StreamingCommunity] Fetching embed (${item.source}): ${embedUrl}`);
               const embedResponse = yield fetch(embedUrl, {
@@ -8821,6 +8831,7 @@ var require_streamingcommunity = __commonJS({
                 console.error(`[StreamingCommunity] Failed to fetch embed: ${embedResponse.status}`);
                 continue;
               }
+              embedCookies = getResponseCookies(embedResponse);
               embedHtml = yield embedResponse.text();
             } catch (e) {
               console.error(`[StreamingCommunity] Failed to fetch embed: ${e.message}`);
@@ -8842,7 +8853,8 @@ var require_streamingcommunity = __commonJS({
             const streamUrl = rewriteStreamingCommunityHost(playlistUrl.toString());
             const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
             const cleanIframeUrl = rewriteStreamingCommunityHost(item.iframeUrl || cleanEmbedUrl);
-            const streamHeaders = getPlaylistHeaders(cleanEmbedUrl);
+            const streamHeaders = getPlaylistHeaders(embedUrl);
+            if (embedCookies) streamHeaders.Cookie = embedCookies;
             console.log(`[StreamingCommunity] Final stream URL (${item.source}): ${streamUrl}`);
             let quality = "1080p";
             let hasItalianAudio = false;

@@ -393,6 +393,20 @@ global.fetch = async function (url, options = {}) {
         });
         return response;
     } catch (error) {
+        if (error?.name !== 'AbortError') {
+            let failedHost = 'unknown';
+            try {
+                failedHost = new URL(String(url)).host;
+            } catch { }
+            console.error('[Fetch] Network failure:', {
+                host: failedHost,
+                name: error?.name || 'Error',
+                message: error?.message || String(error),
+                code: error?.cause?.code || null,
+                cause: error?.cause?.message || null,
+                syscall: error?.cause?.syscall || null
+            });
+        }
         if (error.name === 'AbortError') {
             // Re-throw as a timeout error for clarity if aborted by our timeout
             throw new Error(`Request to ${url} timed out after ${options.timeout || FETCH_TIMEOUT}ms`);

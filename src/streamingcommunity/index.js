@@ -260,6 +260,20 @@ function getPlaylistHeaders(embedUrl) {
   };
 }
 
+function getResponseCookies(response) {
+  try {
+    const cookies = typeof response.headers?.getSetCookie === 'function'
+      ? response.headers.getSetCookie()
+      : [response.headers?.get?.('set-cookie')].filter(Boolean);
+    return cookies
+      .map(value => String(value).split(';', 1)[0])
+      .filter(Boolean)
+      .join('; ');
+  } catch (_) {
+    return '';
+  }
+}
+
 function rewriteStreamingCommunityHost(value) {
   return String(value || '')
     .replace(/vixcloud\.co/gi, streamingCommunityMediaHost)
@@ -469,6 +483,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       const embedUrl = item.embedUrl;
       const isSczSource = item.source === 'scz';
       let embedHtml;
+      let embedCookies = '';
       try {
         console.log(`[StreamingCommunity] Fetching embed (${item.source}): ${embedUrl}`);
         const embedResponse = await fetch(embedUrl, {
@@ -479,6 +494,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
           console.error(`[StreamingCommunity] Failed to fetch embed: ${embedResponse.status}`);
           continue;
         }
+        embedCookies = getResponseCookies(embedResponse);
         embedHtml = await embedResponse.text();
       } catch (e) {
         console.error(`[StreamingCommunity] Failed to fetch embed: ${e.message}`);
@@ -502,7 +518,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       const streamUrl = rewriteStreamingCommunityHost(playlistUrl.toString());
       const cleanEmbedUrl = rewriteStreamingCommunityHost(embedUrl);
       const cleanIframeUrl = rewriteStreamingCommunityHost(item.iframeUrl || cleanEmbedUrl);
-      const streamHeaders = getPlaylistHeaders(cleanEmbedUrl);
+      const streamHeaders = getPlaylistHeaders(embedUrl);
+      if (embedCookies) streamHeaders.Cookie = embedCookies;
       console.log(`[StreamingCommunity] Final stream URL (${item.source}): ${streamUrl}`);
 
       let quality = "1080p";
