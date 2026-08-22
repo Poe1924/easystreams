@@ -309,7 +309,7 @@ var require_quality_helper = __commonJS({
 // cf_bypass.js
 var require_cf_bypass = __commonJS({
   "cf_bypass.js"(exports2, module2) {
-    var { spawn, exec, execFile } = require("child_process");
+    var { spawn, execFile } = require("child_process");
     var path = require("path");
     var fs = require("fs");
     var http = require("http");
@@ -320,7 +320,6 @@ var require_cf_bypass = __commonJS({
     var MAX_GLOBAL_QUEUE = parseInt(process.env.SCRAPLING_MAX_QUEUE || "50", 10);
     var GLOBAL_QUEUE_TIMEOUT = parseInt(process.env.SCRAPLING_QUEUE_TIMEOUT_MS || "60000", 10);
     var SCRAPLING_DEFAULT_TIMEOUT = parseInt(process.env.SCRAPLING_DEFAULT_TIMEOUT_MS || "90000", 10);
-    var SCRAPLING_WATCHDOG_GRACE_MS = parseInt(process.env.SCRAPLING_WATCHDOG_GRACE_MS || "15000", 10);
     var daemonProcess = null;
     var camoufoxReady = false;
     var camoufoxEnsurePromise = null;
@@ -506,118 +505,7 @@ var require_cf_bypass = __commonJS({
       });
     }
     function execPythonBypass(url, provider, options = {}) {
-      return requestDaemon(url, provider, options).catch((err) => {
-        if (err && err.code === "CAMOUFOX_UNAVAILABLE") {
-          throw err;
-        }
-        console.log(`[SC][${provider}] Daemon non disponibile (${err.message}), fallback a processo singolo...`);
-        return execPythonBypassSingle(url, provider, options);
-      });
-    }
-    function execPythonBypassSingle(url, provider, options = {}) {
-      return new Promise((resolve, reject) => {
-        const scriptPath = path.join(__dirname, "src", "utils", "scrapling_bypass.py");
-        const args = [
-          scriptPath,
-          url,
-          "--timeout",
-          String(options.timeout || SCRAPLING_DEFAULT_TIMEOUT),
-          "--wait-until",
-          options.waitUntil || "domcontentloaded"
-        ];
-        if (options.method) {
-          args.push("--method", options.method);
-        }
-        if (options.body) {
-          args.push("--data", options.body);
-        }
-        if (options.headers) {
-          args.push("--headers", JSON.stringify(options.headers));
-        }
-        if (provider) {
-          args.push("--provider", provider);
-        }
-        console.log(`[SC][${provider}] Avvio bypass Scrapling per: ${url}`);
-        const venvPython = path.join(process.cwd(), ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
-        let pythonExe = "python3";
-        if (fs.existsSync(venvPython)) {
-          pythonExe = venvPython;
-        } else if (process.platform === "win32") {
-          pythonExe = "python";
-        }
-        const spawnOptions = {};
-        if (process.platform !== "win32") {
-          spawnOptions.detached = true;
-        }
-        const child = spawn(pythonExe, args, spawnOptions);
-        let stdout = "";
-        let stderr = "";
-        const executionTimeout = (parseInt(options.timeout, 10) || SCRAPLING_DEFAULT_TIMEOUT) + SCRAPLING_WATCHDOG_GRACE_MS;
-        let watchdog = setTimeout(() => {
-          console.error(`[SC][${provider}] Watchdog timeout raggiunto (${executionTimeout}ms). Uccido l'albero dei processi.`);
-          watchdog = null;
-          if (process.platform === "win32") {
-            exec(`taskkill /pid ${child.pid} /T /F`, (err) => {
-              if (err) {
-                console.error(`[SC][${provider}] taskkill fallito: ${err.message}`);
-                try {
-                  child.kill("SIGKILL");
-                } catch (e) {
-                }
-              }
-            });
-          } else {
-            try {
-              process.kill(-child.pid, "SIGKILL");
-            } catch (e) {
-              try {
-                child.kill("SIGKILL");
-              } catch (err) {
-              }
-            }
-          }
-        }, executionTimeout);
-        child.on("error", (err) => {
-          if (watchdog) {
-            clearTimeout(watchdog);
-            watchdog = null;
-          }
-          reject(new Error(`Impossibile avviare Python (${pythonExe}): ${err.message}`));
-        });
-        child.stdout.on("data", (data) => {
-          stdout += data.toString();
-        });
-        child.stderr.on("data", (data) => {
-          stderr += data.toString();
-        });
-        child.on("close", (code) => {
-          if (watchdog) {
-            clearTimeout(watchdog);
-            watchdog = null;
-          }
-          let result;
-          try {
-            if (stdout.trim()) {
-              result = JSON.parse(stdout);
-            }
-          } catch (e) {
-          }
-          if (result && result.status === "ok") {
-            return resolve(result);
-          }
-          if (result && result.status === "error") {
-            return reject(new Error(result.message || "Unknown Scrapling error"));
-          }
-          if (code !== 0) {
-            console.error(`[SC][${provider}] Python script fallito con codice ${code}: ${stderr}`);
-            return reject(new Error(stderr.trim() || `Python script exited with code ${code}`));
-          }
-          if (!result) {
-            console.error(`[SC][${provider}] Errore parsing output Python (Vuoto o non valido): ${stdout}`);
-            reject(new Error(`Failed to parse Scrapling output: Empty or invalid JSON`));
-          }
-        });
-      });
+      return requestDaemon(url, provider, options);
     }
     function runBypass(url, provider, options, sessionFile) {
       return __async(this, null, function* () {

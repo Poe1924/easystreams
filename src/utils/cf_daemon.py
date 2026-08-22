@@ -96,8 +96,17 @@ def handle_bypass_request(params):
             try:
                 page.wait_for_load_state("domcontentloaded", timeout=5000)
             except: pass
-            html = page.content()
-            current_url = page.url
+            last_error = None
+            for _ in range(20):
+                try:
+                    html = page.content()
+                    current_url = page.url
+                    break
+                except Exception as e:
+                    last_error = e
+                    time.sleep(0.25)
+            else:
+                raise last_error
 
         if is_ch(safe_title(page)):
             return {'status': 'error', 'message': 'Bypass fallito - ancora in challenge'}
