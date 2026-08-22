@@ -93,7 +93,7 @@ function formatStream(stream, providerName) {
 
     // Format resolution
     let quality = stream.quality || '';
-    if (quality === '2160p') quality = '🔥4K UHD';
+    if (['4k', '2160p'].includes(String(quality).toLowerCase())) quality = '🔥4K UHD';
     else if (quality === '1440p') quality = '✨ QHD';
     else if (quality === '1080p') quality = '🚀 FHD';
     else if (quality === '720p') quality = '💿 HD';

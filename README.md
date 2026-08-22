@@ -19,6 +19,7 @@ Il progetto è progettato per essere versatile e può essere utilizzato in due m
 -   **Mediaset Infinity** (TV & VOD - solo Addon Stremio con EasyProxy)
 -   **RaiPlay** (TV & VOD - solo Addon Stremio con EasyProxy)
 -   **WittyTV** (TV & VOD - solo Addon Stremio con EasyProxy)
+-   **Cinejoy** (Film & Serie TV - link diretti, senza EasyProxy)
 
 ---
 

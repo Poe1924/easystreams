@@ -1552,6 +1552,7 @@ const providers = {
     raiplay: require('./src/raiplay/index.js'),
     pcc: require('./src/pcc/index.js'),
     cc: require('./src/cc/index.js'),
+    cinejoy: require('./src/cinejoy/index.js'),
 
 };
 
@@ -1618,11 +1619,11 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
         } else if (isImdbRequest) {
             plan = likelyAnime
                 ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie']
-                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc'];
+                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_MOVIES) {
             plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie'];
         } else {
-            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc'];
+            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy'];
         }
     } else if (normalizedType === 'anime') {
         plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc'];
@@ -1630,11 +1631,11 @@ function getProviderExecutionOrder(type, providerId, requestContext, animeRoutin
         if (isImdbRequest) {
             plan = likelyAnime
                 ? ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc']
-                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc'];
+                : ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy'];
         } else if (likelyAnime || ENABLE_ANIME_FALLBACK_ON_SERIES) {
             plan = ['animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc'];
         } else {
-            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc'];
+            plan = ['mediaset', 'raiplay', 'streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy'];
         }
     }
 
@@ -2529,33 +2530,19 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
             }
         }
 
-        // Sort: StreamingCommunity first, then Language (ITA > SUB ITA), then Quality Descending
+        // Sort: Language (ITA > non-ITA), then Quality descending, then Provider.
         validStreams.sort((a, b) => {
-            // 1. StreamingCommunity Priority
+            // 1. Language Priority (ITA first)
             const providerA = a.behaviorHints?.bingeGroup || '';
             const providerB = b.behaviorHints?.bingeGroup || '';
-
-            const isA_SC = providerA === 'streamingcommunity';
-            const isB_SC = providerB === 'streamingcommunity';
-
-            if (isA_SC && !isB_SC) return -1;
-            if (!isA_SC && isB_SC) return 1;
-
-            // 2. Language Priority (ITA first)
-            const getLangScore = (stream) => {
-                const lang = stream.language || '';
-                return lang === '🇮🇹' ? 1 : 0;
-            };
-
+            const getLangScore = (stream) => stream.language === '🇮🇹' ? 1 : 0;
             const langScoreA = getLangScore(a);
             const langScoreB = getLangScore(b);
+            if (langScoreA !== langScoreB) return langScoreB - langScoreA;
 
-            if (langScoreA !== langScoreB) {
-                return langScoreB - langScoreA; // Descending (2 > 1 > 0)
-            }
-
-            // 3. Quality Priority
+            // 2. Quality Priority
             const qualityOrder = {
+                '🔥4K': 10,
                 '🔥4K UHD': 10,
                 '✨ QHD': 9,
                 '🚀 FHD': 8,
@@ -2581,8 +2568,8 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
 
             if (scoreA !== scoreB) return scoreB - scoreA; // Descending
 
-            // 4. Provider priority
-            const providerOrder = ['mediaset', 'raiplay', 'animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'streamingcommunity', 'vidxgo', 'altadefinizionestreaming'];
+            // 3. Provider priority
+            const providerOrder = ['mediaset', 'raiplay', 'animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'streamingcommunity', 'vidxgo', 'altadefinizionestreaming', 'cinejoy'];
             const prioA = providerOrder.indexOf(providerA);
             const prioB = providerOrder.indexOf(providerB);
             return (prioA >= 0 ? prioA : 99) - (prioB >= 0 ? prioB : 99);
