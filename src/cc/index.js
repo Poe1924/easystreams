@@ -590,6 +590,25 @@ async function checkStreamUrl(url) {
     }
 }
 
+async function checkItalianAudioInPlaylist(url) {
+    if (!/\.m3u8(?:[?#].*)?$/i.test(String(url || ''))) return false;
+
+    try {
+        const response = await fetchWithTimeout(url, {
+            timeout: FETCH_TIMEOUT,
+            headers: {
+                Referer: `${BASE_URL}/`,
+                'User-Agent': USER_AGENT
+            }
+        });
+        if (!response.ok) return false;
+        const text = await response.text();
+        return /#EXT-X-MEDIA:[^\r\n]*(?:LANGUAGE\s*=\s*"?(?:it|ita)"?|NAME\s*=\s*"?(?:Italian|Italiano)"?)/i.test(text);
+    } catch {
+        return false;
+    }
+}
+
 async function getStreams(id, type, season, episode, providerContext = null) {
     const parsedRequest = parseCompositeSeriesId(id, season, episode);
     id = parsedRequest.normalizedId;
@@ -740,6 +759,15 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             console.warn(`[CinemaCity] Stream pre-check failed`);
             return [];
         }
+
+        if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
+            hasItalian = await checkItalianAudioInPlaylist(streamUrl);
+        }
+        if (!hasItalian) {
+            console.log(`[CinemaCity] Stream scartato: audio italiano non trovato`);
+            return [];
+        }
+
         console.log(`[CinemaCity] Direct stream: ${streamUrl}`);
 
         const result = {

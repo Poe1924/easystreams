@@ -9,6 +9,7 @@ const vidxgo = require('./vidxgo/index');
 const altadefinizionestreaming = require('./altadefinizionestreaming/index');
 const pcc = require('./pcc/index');
 const cc = require('./cc/index');
+const cinejoy = require('./cinejoy/index');
 const { createTimeoutSignal } = require('./fetch_helper.js');
 
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
@@ -226,7 +227,7 @@ async function getStreams(id, type, season, episode) {
         if (likelyAnime || isAnimeProviderRequest) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie');
         } else {
-            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc');
+            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy');
         }
     } else if (normalizedType === 'anime') {
         selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'vidxgo', 'pcc');
@@ -235,9 +236,9 @@ async function getStreams(id, type, season, episode) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie');
         } else {
             if (isImdbRequest) {
-            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc');
+            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy');
             } else {
-            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc');
+            selectedProviders.push('streamingcommunity', 'vidxgo', 'guardoserie', 'altadefinizionestreaming', 'pcc', 'cc', 'cinejoy');
             }
         }
     } else {
@@ -321,6 +322,15 @@ async function getStreams(id, type, season, episode) {
             continue;
         }
 
+        if (providerName === 'cinejoy') {
+            promises.push(
+                cinejoy.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
+                    .then(s => ({ provider: 'Cinejoy', streams: s, status: 'fulfilled' }))
+                    .catch(e => ({ provider: 'Cinejoy', error: e, status: 'rejected' }))
+            );
+            continue;
+        }
+
     }
 
     const results = await Promise.all(promises);
@@ -332,12 +342,14 @@ async function getStreams(id, type, season, episode) {
 
     const qualityRank = { '4K': 0, '2160p': 0, '1440p': 1, '1080p': 2, 'fhd': 2, '720p': 3, 'hd': 3, '480p': 4, '360p': 5, '240p': 6 };
     streams.sort((a, b) => {
+        const la = String(a.language || '').includes('🇮🇹') ? 0 : 1;
+        const lb = String(b.language || '').includes('🇮🇹') ? 0 : 1;
+        if (la !== lb) return la - lb;
+
         const qa = qualityRank[String(a.quality || '').toLowerCase()] ?? 99;
         const qb = qualityRank[String(b.quality || '').toLowerCase()] ?? 99;
         if (qa !== qb) return qa - qb;
-        const la = String(a.language || '').includes('🇮🇹') ? 0 : 1;
-        const lb = String(b.language || '').includes('🇮🇹') ? 0 : 1;
-        return la - lb;
+        return 0;
     });
 
     return streams;

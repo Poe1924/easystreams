@@ -100,7 +100,7 @@ var require_formatter = __commonJS({
     }
     function formatStream(stream, providerName) {
       let quality = stream.quality || "";
-      if (quality === "2160p") quality = "\u{1F525}4K UHD";
+      if (["4k", "2160p"].includes(String(quality).toLowerCase())) quality = "\u{1F525}4K UHD";
       else if (quality === "1440p") quality = "\u2728 QHD";
       else if (quality === "1080p") quality = "\u{1F680} FHD";
       else if (quality === "720p") quality = "\u{1F4BF} HD";
@@ -13880,6 +13880,25 @@ var require_cc = __commonJS({
         }
       });
     }
+    function checkItalianAudioInPlaylist(url) {
+      return __async(this, null, function* () {
+        if (!/\.m3u8(?:[?#].*)?$/i.test(String(url || ""))) return false;
+        try {
+          const response = yield fetchWithTimeout(url, {
+            timeout: FETCH_TIMEOUT,
+            headers: {
+              Referer: `${BASE_URL}/`,
+              "User-Agent": USER_AGENT
+            }
+          });
+          if (!response.ok) return false;
+          const text = yield response.text();
+          return /#EXT-X-MEDIA:[^\r\n]*(?:LANGUAGE\s*=\s*"?(?:it|ita)"?|NAME\s*=\s*"?(?:Italian|Italiano)"?)/i.test(text);
+        } catch (e) {
+          return false;
+        }
+      });
+    }
     function getStreams2(id, type, season, episode, providerContext = null) {
       return __async(this, null, function* () {
         const parsedRequest = parseCompositeSeriesId2(id, season, episode);
@@ -14002,6 +14021,13 @@ var require_cc = __commonJS({
             console.warn(`[CinemaCity] Stream pre-check failed`);
             return [];
           }
+          if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
+            hasItalian = yield checkItalianAudioInPlaylist(streamUrl);
+          }
+          if (!hasItalian) {
+            console.log(`[CinemaCity] Stream scartato: audio italiano non trovato`);
+            return [];
+          }
           console.log(`[CinemaCity] Direct stream: ${streamUrl}`);
           const result = {
             name: "CinemaCity",
@@ -14027,6 +14053,348 @@ var require_cc = __commonJS({
   }
 });
 
+// src/cinejoy/index.js
+var require_cinejoy = __commonJS({
+  "src/cinejoy/index.js"(exports2, module2) {
+    var { formatStream } = require_formatter();
+    var { checkQualityFromText } = require_quality_helper();
+    var IS_SERVER = typeof process !== "undefined" && process.versions && process.versions.node;
+    if (!IS_SERVER) {
+      module2.exports = {
+        getStreams: (id, type, season, episode) => __async(null, null, function* () {
+          try {
+            const params = new URLSearchParams({
+              id: String(id || ""),
+              type: String(type || ""),
+              s: String(season || 1),
+              ep: String(episode || 1)
+            });
+            const response = yield fetch(`https://easystreams.realbestia.com/resolve/cinejoy?${params}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = yield response.json();
+            return Array.isArray(data == null ? void 0 : data.streams) ? data.streams : [];
+          } catch (error) {
+            console.error("[Cinejoy-Client] API Error:", error.message);
+            return [];
+          }
+        })
+      };
+    } else {
+      let fetchWithTimeout2 = function(url, options = {}, timeoutMs = 5e3) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        return fetch(url, __spreadProps(__spreadValues({}, options), { signal: controller.signal })).finally(() => clearTimeout(timer));
+      }, resolveTmdbId2 = function(id, providerContext = null) {
+        const contextId = String((providerContext == null ? void 0 : providerContext.tmdbId) || "").trim();
+        if (/^\d+$/.test(contextId)) return contextId;
+        const rawId = String(id || "").trim();
+        const prefixedId = rawId.match(/^tmdb:(\d+)$/i);
+        if (prefixedId) return prefixedId[1];
+        if (/^\d+$/.test(rawId)) return rawId;
+        return null;
+      }, getTitleHint2 = function(providerContext) {
+        const hints = [
+          ...Array.isArray(providerContext == null ? void 0 : providerContext.titleHints) ? providerContext.titleHints : [],
+          ...Array.isArray(providerContext == null ? void 0 : providerContext.mappedTitleHints) ? providerContext.mappedTitleHints : []
+        ];
+        return hints.map((value) => String(value || "").trim()).find(Boolean) || null;
+      }, parseHlsAttributes2 = function(value) {
+        const attributes = {};
+        const regex = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/g;
+        let match;
+        while ((match = regex.exec(value)) !== null) {
+          attributes[match[1]] = match[2].replace(/^"|"$/g, "");
+        }
+        return attributes;
+      }, normalizeQuality2 = function(height) {
+        const value = Number.parseInt(height, 10);
+        if (!Number.isInteger(value)) return null;
+        if (value >= 2160) return "4K";
+        if (value >= 1440) return "1440p";
+        if (value >= 1080) return "1080p";
+        if (value >= 720) return "720p";
+        if (value >= 480) return "480p";
+        if (value >= 360) return "360p";
+        return "240p";
+      }, inspectHlsMaster2 = function(text) {
+        var _a;
+        const audioLanguages = [];
+        const audioSeen = /* @__PURE__ */ new Set();
+        const qualities = [];
+        const qualitySeen = /* @__PURE__ */ new Set();
+        for (const line of String(text || "").split(/\r?\n/)) {
+          if (line.startsWith("#EXT-X-MEDIA:") && /TYPE=AUDIO/i.test(line)) {
+            const attributes = parseHlsAttributes2(line.slice("#EXT-X-MEDIA:".length));
+            const language = String(attributes.LANGUAGE || "").trim().toLowerCase();
+            const name = String(attributes.NAME || language).trim();
+            const label = language === "it" ? "Italian" : name || language;
+            const key = label.toLowerCase();
+            if (key && !audioSeen.has(key)) {
+              audioSeen.add(key);
+              audioLanguages.push(label);
+            }
+          }
+          if (line.startsWith("#EXT-X-STREAM-INF:")) {
+            const attributes = parseHlsAttributes2(line.slice("#EXT-X-STREAM-INF:".length));
+            const height = (_a = String(attributes.RESOLUTION || "").match(/x(\d+)$/i)) == null ? void 0 : _a[1];
+            const quality = normalizeQuality2(height);
+            if (quality && !qualitySeen.has(quality)) {
+              qualitySeen.add(quality);
+              qualities.push(quality);
+            }
+          }
+        }
+        const qualityRank = { "4K": 0, "1440p": 1, "1080p": 2, "720p": 3, "480p": 4, "360p": 5, "240p": 6 };
+        qualities.sort((a, b) => qualityRank[a] - qualityRank[b]);
+        return {
+          audioLanguages,
+          qualities,
+          quality: qualities[0] || checkQualityFromText(text) || null
+        };
+      }, getMediaRequest2 = function(type, tmdbId, season, episode) {
+        const isMovie = type === "movie";
+        return {
+          path: isMovie ? "movie" : "series",
+          payload: isMovie ? { tmdb: tmdbId } : { tmdb: tmdbId, season: String(season), episode: String(episode) }
+        };
+      };
+      fetchWithTimeout = fetchWithTimeout2, resolveTmdbId = resolveTmdbId2, getTitleHint = getTitleHint2, parseHlsAttributes = parseHlsAttributes2, normalizeQuality = normalizeQuality2, inspectHlsMaster = inspectHlsMaster2, getMediaRequest = getMediaRequest2;
+      const { webcrypto } = require("crypto");
+      const BASE_URL = "https://cinejoy.to";
+      const API_URL = "https://api.shegu.st";
+      const WASM_URL = `${API_URL}/crush.wasm`;
+      const TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
+      const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+      const REQUEST_HEADER = { "Content-Type": "text/plain;charset=UTF-8" };
+      let wasmExportsPromise = null;
+      let serversCache = null;
+      let serversCacheAt = 0;
+      const titleCache = /* @__PURE__ */ new Map();
+      function getWasmExports() {
+        return __async(this, null, function* () {
+          if (!wasmExportsPromise) {
+            wasmExportsPromise = fetchWithTimeout2(WASM_URL, {}, 8e3).then((response) => {
+              if (!response.ok) throw new Error(`Cinejoy WASM HTTP ${response.status}`);
+              return response.arrayBuffer();
+            }).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => instance.exports).catch((error) => {
+              wasmExportsPromise = null;
+              throw error;
+            });
+          }
+          return wasmExportsPromise;
+        });
+      }
+      function sealRequest(payload) {
+        return __async(this, null, function* () {
+          const wasm = yield getWasmExports();
+          const encoder = new TextEncoder();
+          const input = encoder.encode(JSON.stringify(payload));
+          const keyMaterial = new Uint8Array(44);
+          webcrypto.getRandomValues(keyMaterial);
+          const inputPtr = wasm.alloc(input.length);
+          const keyPtr = wasm.alloc(keyMaterial.length);
+          const outputCapacity = input.length + 512;
+          const outputPtr = wasm.alloc(outputCapacity);
+          try {
+            new Uint8Array(wasm.memory.buffer).set(input, inputPtr);
+            new Uint8Array(wasm.memory.buffer).set(keyMaterial, keyPtr);
+            const sealedLength = wasm.seal_request(
+              inputPtr,
+              input.length,
+              keyPtr,
+              keyMaterial.length,
+              outputPtr,
+              outputCapacity
+            );
+            if (!Number.isInteger(sealedLength) || sealedLength < 98 || sealedLength > outputCapacity) {
+              throw new Error("Cinejoy request sealing failed");
+            }
+            const sealed = new Uint8Array(wasm.memory.buffer).slice(outputPtr, outputPtr + sealedLength);
+            return {
+              responseKey: sealed.slice(0, 32),
+              keyId: sealed[32],
+              ephemeralPublic: sealed.slice(33, 98),
+              body: sealed.slice(98)
+            };
+          } finally {
+            wasm.dealloc(inputPtr, input.length);
+            wasm.dealloc(keyPtr, keyMaterial.length);
+            wasm.dealloc(outputPtr, outputCapacity);
+          }
+        });
+      }
+      function openResponse(responseBytes, request) {
+        return __async(this, null, function* () {
+          if (responseBytes.length < 28) throw new Error("Cinejoy response too short");
+          const encoder = new TextEncoder();
+          const additionalData = new Uint8Array([
+            ...encoder.encode("lumen-gate-v2"),
+            0,
+            2,
+            request.keyId,
+            ...request.ephemeralPublic
+          ]);
+          const cryptoKey = yield webcrypto.subtle.importKey(
+            "raw",
+            request.responseKey,
+            "AES-GCM",
+            false,
+            ["decrypt"]
+          );
+          const plaintext = yield webcrypto.subtle.decrypt(
+            {
+              name: "AES-GCM",
+              iv: responseBytes.slice(0, 12),
+              additionalData,
+              tagLength: 128
+            },
+            cryptoKey,
+            responseBytes.slice(12)
+          );
+          const result = JSON.parse(new TextDecoder().decode(plaintext));
+          if (!result || typeof result.status !== "number" || !("data" in result)) {
+            throw new Error("Invalid Cinejoy response");
+          }
+          if (result.status < 200 || result.status >= 300) {
+            throw new Error(`Cinejoy API HTTP ${result.status}`);
+          }
+          return result.data;
+        });
+      }
+      function encryptedRequest(path, payload) {
+        return __async(this, null, function* () {
+          const request = yield sealRequest({ path, payload });
+          const response = yield fetchWithTimeout2(`${API_URL}/g`, {
+            method: "POST",
+            headers: REQUEST_HEADER,
+            body: request.body
+          }, 8e3);
+          const responseBytes = new Uint8Array(yield response.arrayBuffer());
+          if (!response.ok) throw new Error(`Cinejoy gateway HTTP ${response.status}`);
+          return openResponse(responseBytes, request);
+        });
+      }
+      function getServers() {
+        return __async(this, null, function* () {
+          if (serversCache && Date.now() - serversCacheAt < 5 * 60 * 1e3) return serversCache;
+          const response = yield fetchWithTimeout2(`${API_URL}/servers`, {}, 5e3);
+          if (!response.ok) throw new Error(`Cinejoy servers HTTP ${response.status}`);
+          const payload = yield response.json();
+          const servers = Array.isArray(payload) ? payload : payload == null ? void 0 : payload.servers;
+          if (!Array.isArray(servers)) throw new Error("Invalid Cinejoy servers response");
+          serversCache = servers.filter((server) => (server == null ? void 0 : server.name) && server.status === "ok");
+          serversCacheAt = Date.now();
+          return serversCache;
+        });
+      }
+      function resolveMediaTitle(tmdbId, type, providerContext = null) {
+        return __async(this, null, function* () {
+          const hintedTitle = getTitleHint2(providerContext);
+          if (hintedTitle) return hintedTitle;
+          const endpoint = type === "movie" ? "movie" : "tv";
+          const cacheKey = `${endpoint}:${tmdbId}`;
+          if (titleCache.has(cacheKey)) return titleCache.get(cacheKey);
+          try {
+            const response = yield fetchWithTimeout2(
+              `https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}?api_key=${TMDB_API_KEY2}&language=it-IT`,
+              {},
+              3e3
+            );
+            if (response.ok) {
+              const payload = yield response.json();
+              const title = (payload == null ? void 0 : payload.title) || (payload == null ? void 0 : payload.name) || (payload == null ? void 0 : payload.original_title) || (payload == null ? void 0 : payload.original_name) || null;
+              titleCache.set(cacheKey, title);
+              return title;
+            }
+          } catch (e) {
+          }
+          titleCache.set(cacheKey, null);
+          return null;
+        });
+      }
+      function inspectPlaylist(url, headers) {
+        return __async(this, null, function* () {
+          const response = yield fetchWithTimeout2(url, { headers }, 4e3);
+          if (!response.ok) throw new Error(`Cinejoy playlist HTTP ${response.status}`);
+          return inspectHlsMaster2(yield response.text());
+        });
+      }
+      function getServerStreams(server, mediaRequest, title) {
+        return __async(this, null, function* () {
+          const data = yield encryptedRequest(`/${server.name}/${mediaRequest.path}`, mediaRequest.payload);
+          const entries = Array.isArray(data == null ? void 0 : data.stream) ? data.stream : [];
+          const headers = { Referer: `${BASE_URL}/`, "User-Agent": USER_AGENT };
+          return Promise.all(entries.map((entry) => __async(null, null, function* () {
+            const playlist = String((entry == null ? void 0 : entry.playlist) || "").trim();
+            if (!/^https?:\/\/[^\s]+\.m3u8(?:[?#].*)?$/i.test(playlist)) return null;
+            let playlistInfo = null;
+            try {
+              playlistInfo = yield inspectPlaylist(playlist, headers);
+            } catch (e) {
+              playlistInfo = null;
+            }
+            const quality = (playlistInfo == null ? void 0 : playlistInfo.quality) || (server["4k"] === true ? "4K" : "Unknown");
+            const audioLanguages = (playlistInfo == null ? void 0 : playlistInfo.audioLanguages) || [];
+            const availableQualities = (playlistInfo == null ? void 0 : playlistInfo.qualities) || [];
+            const hasItalianAudio = audioLanguages.some((language) => /\bitalian\b/i.test(language));
+            if (!hasItalianAudio) return null;
+            const streamLanguage = "Italian";
+            const normalizedQuality = quality === "4K" ? "2160p" : quality;
+            return formatStream({
+              name: "Cinejoy",
+              title,
+              url: playlist,
+              quality: normalizedQuality,
+              language: streamLanguage,
+              audioLanguages,
+              availableQualities,
+              type: "hls"
+              // Cinejoy accepts direct HLS requests. Do not expose headers here:
+              // Stremio's local HLS proxy corrupts the child playlist URLs.
+            }, "Cinejoy");
+          }))).then((streams) => streams.filter(Boolean));
+        });
+      }
+      function getStreams2(id, type, season, episode, providerContext = null) {
+        return __async(this, null, function* () {
+          const normalizedType = String(type || "").toLowerCase();
+          if (!["movie", "tv", "series"].includes(normalizedType)) return [];
+          const tmdbId = resolveTmdbId2(id, providerContext);
+          if (!tmdbId) return [];
+          const isMovie = normalizedType === "movie";
+          const effectiveSeason = Number.parseInt(String(season || ""), 10) || 1;
+          const effectiveEpisode = Number.parseInt(String(episode || ""), 10) || 1;
+          const mediaRequest = getMediaRequest2(isMovie ? "movie" : "series", tmdbId, effectiveSeason, effectiveEpisode);
+          const mediaTitle = yield resolveMediaTitle(tmdbId, isMovie ? "movie" : "tv", providerContext);
+          const baseTitle = mediaTitle || (isMovie ? "Film" : "Serie TV");
+          const title = isMovie ? baseTitle : `${baseTitle} ${effectiveSeason}x${effectiveEpisode}`;
+          let servers;
+          try {
+            servers = yield getServers();
+          } catch (e) {
+            return [];
+          }
+          const primaryServer = servers.find((server) => server["4k"] === true) || servers[0];
+          if (!primaryServer) return [];
+          try {
+            return yield getServerStreams(primaryServer, mediaRequest, title);
+          } catch (e) {
+            return [];
+          }
+        });
+      }
+      module2.exports = { getStreams: getStreams2 };
+    }
+    var fetchWithTimeout;
+    var resolveTmdbId;
+    var getTitleHint;
+    var parseHlsAttributes;
+    var normalizeQuality;
+    var inspectHlsMaster;
+    var getMediaRequest;
+  }
+});
+
 // src/index.js
 var guardoserie = require_guardoserie();
 var streamingcommunity = require_streamingcommunity();
@@ -14037,6 +14405,7 @@ var vidxgo = require_vidxgo2();
 var altadefinizionestreaming = require_altadefinizionestreaming();
 var pcc = require_pcc();
 var cc = require_cc();
+var cinejoy = require_cinejoy();
 var { createTimeoutSignal } = require_fetch_helper();
 var TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 var CONTEXT_TIMEOUT = 3e3;
@@ -14223,7 +14592,7 @@ function getStreams(id, type, season, episode) {
       if (likelyAnime || isAnimeProviderRequest) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
       } else {
-        selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc", "cc");
+        selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc", "cc", "cinejoy");
       }
     } else if (normalizedType === "anime") {
       selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie", "vidxgo", "pcc");
@@ -14232,9 +14601,9 @@ function getStreams(id, type, season, episode) {
         selectedProviders.push("animeunity", "animeworld", "animesaturn", "guardoserie");
       } else {
         if (isImdbRequest) {
-          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc", "cc");
+          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc", "cc", "cinejoy");
         } else {
-          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc", "cc");
+          selectedProviders.push("streamingcommunity", "vidxgo", "guardoserie", "altadefinizionestreaming", "pcc", "cc", "cinejoy");
         }
       }
     } else {
@@ -14295,6 +14664,12 @@ function getStreams(id, type, season, episode) {
         );
         continue;
       }
+      if (providerName === "cinejoy") {
+        promises.push(
+          cinejoy.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext).then((s) => ({ provider: "Cinejoy", streams: s, status: "fulfilled" })).catch((e) => ({ provider: "Cinejoy", error: e, status: "rejected" }))
+        );
+        continue;
+      }
     }
     const results = yield Promise.all(promises);
     for (const result of results) {
@@ -14305,12 +14680,13 @@ function getStreams(id, type, season, episode) {
     const qualityRank = { "4K": 0, "2160p": 0, "1440p": 1, "1080p": 2, "fhd": 2, "720p": 3, "hd": 3, "480p": 4, "360p": 5, "240p": 6 };
     streams.sort((a, b) => {
       var _a, _b;
+      const la = String(a.language || "").includes("\u{1F1EE}\u{1F1F9}") ? 0 : 1;
+      const lb = String(b.language || "").includes("\u{1F1EE}\u{1F1F9}") ? 0 : 1;
+      if (la !== lb) return la - lb;
       const qa = (_a = qualityRank[String(a.quality || "").toLowerCase()]) != null ? _a : 99;
       const qb = (_b = qualityRank[String(b.quality || "").toLowerCase()]) != null ? _b : 99;
       if (qa !== qb) return qa - qb;
-      const la = String(a.language || "").includes("\u{1F1EE}\u{1F1F9}") ? 0 : 1;
-      const lb = String(b.language || "").includes("\u{1F1EE}\u{1F1F9}") ? 0 : 1;
-      return la - lb;
+      return 0;
     });
     return streams;
   });

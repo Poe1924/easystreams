@@ -101,7 +101,7 @@ var require_formatter = __commonJS({
     }
     function formatStream2(stream, providerName) {
       let quality = stream.quality || "";
-      if (quality === "2160p") quality = "\u{1F525}4K UHD";
+      if (["4k", "2160p"].includes(String(quality).toLowerCase())) quality = "\u{1F525}4K UHD";
       else if (quality === "1440p") quality = "\u2728 QHD";
       else if (quality === "1080p") quality = "\u{1F680} FHD";
       else if (quality === "720p") quality = "\u{1F4BF} HD";
@@ -800,6 +800,25 @@ function checkStreamUrl(url) {
     }
   });
 }
+function checkItalianAudioInPlaylist(url) {
+  return __async(this, null, function* () {
+    if (!/\.m3u8(?:[?#].*)?$/i.test(String(url || ""))) return false;
+    try {
+      const response = yield fetchWithTimeout(url, {
+        timeout: FETCH_TIMEOUT,
+        headers: {
+          Referer: `${BASE_URL}/`,
+          "User-Agent": USER_AGENT
+        }
+      });
+      if (!response.ok) return false;
+      const text = yield response.text();
+      return /#EXT-X-MEDIA:[^\r\n]*(?:LANGUAGE\s*=\s*"?(?:it|ita)"?|NAME\s*=\s*"?(?:Italian|Italiano)"?)/i.test(text);
+    } catch (e) {
+      return false;
+    }
+  });
+}
 function getStreams(id, type, season, episode, providerContext = null) {
   return __async(this, null, function* () {
     const parsedRequest = parseCompositeSeriesId(id, season, episode);
@@ -920,6 +939,13 @@ function getStreams(id, type, season, episode, providerContext = null) {
       const streamUrl = resolveUrl(movieUrl, selectedUrl);
       if (!(yield checkStreamUrl(streamUrl))) {
         console.warn(`[CinemaCity] Stream pre-check failed`);
+        return [];
+      }
+      if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
+        hasItalian = yield checkItalianAudioInPlaylist(streamUrl);
+      }
+      if (!hasItalian) {
+        console.log(`[CinemaCity] Stream scartato: audio italiano non trovato`);
         return [];
       }
       console.log(`[CinemaCity] Direct stream: ${streamUrl}`);

@@ -16,6 +16,7 @@ const PROVIDER_META = {
     streamingcommunity: { display: 'StreamingCommunity', category: 'Film & Serie', accent: '#E50914', icon: 'film' },
     cinemacity: { display: 'CinemaCity', category: 'Film & Serie', accent: '#EC4899', icon: 'film' },
     cc: { display: 'CinemaCity', category: 'Film & Serie', accent: '#EC4899', icon: 'film' },
+    cinejoy: { display: 'Cinejoy', category: 'Film & Serie', accent: '#95FF50', icon: 'film' },
     mediaset: { display: 'Mediaset Infinity', category: 'Film & Serie ufficiali', accent: '#FF5A1F', icon: 'tv' },
     raiplay: { display: 'RaiPlay', category: 'Film & Serie ufficiali', accent: '#0066CC', icon: 'tv' }
 };
