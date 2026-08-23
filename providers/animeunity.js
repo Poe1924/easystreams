@@ -7615,7 +7615,7 @@ var require_formatter = __commonJS({
     }
     function formatStream2(stream, providerName) {
       let quality = stream.quality || "";
-      if (quality === "2160p") quality = "\u{1F525}4K UHD";
+      if (["4k", "2160p"].includes(String(quality).toLowerCase())) quality = "\u{1F525}4K UHD";
       else if (quality === "1440p") quality = "\u2728 QHD";
       else if (quality === "1080p") quality = "\u{1F680} FHD";
       else if (quality === "720p") quality = "\u{1F4BF} HD";
