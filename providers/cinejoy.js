@@ -331,7 +331,16 @@ if (!IS_SERVER) {
     })
   };
 } else {
-  let fetchWithTimeout = function(url, options = {}, timeoutMs = 5e3) {
+  let setDiagnostics = function(stage, details = {}) {
+    lastDiagnostics = __spreadValues({
+      stage,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    }, details);
+    const summary = Object.entries(details).filter(([, value]) => value !== void 0 && value !== null).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`).join(" ");
+    console.log(`[Cinejoy] ${stage}${summary ? ` ${summary}` : ""}`);
+  }, getDiagnostics = function() {
+    return __spreadValues({}, lastDiagnostics);
+  }, fetchWithTimeout = function(url, options = {}, timeoutMs = 5e3) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     return fetch(url, __spreadProps(__spreadValues({}, options), { signal: controller.signal })).finally(() => clearTimeout(timer));
@@ -409,18 +418,28 @@ if (!IS_SERVER) {
       payload: isMovie ? { tmdb: tmdbId } : { tmdb: tmdbId, season: String(season), episode: String(episode) }
     };
   };
-  fetchWithTimeout2 = fetchWithTimeout, resolveTmdbId2 = resolveTmdbId, getTitleHint2 = getTitleHint, parseHlsAttributes2 = parseHlsAttributes, normalizeQuality2 = normalizeQuality, inspectHlsMaster2 = inspectHlsMaster, getMediaRequest2 = getMediaRequest;
+  setDiagnostics2 = setDiagnostics, getDiagnostics2 = getDiagnostics, fetchWithTimeout2 = fetchWithTimeout, resolveTmdbId2 = resolveTmdbId, getTitleHint2 = getTitleHint, parseHlsAttributes2 = parseHlsAttributes, normalizeQuality2 = normalizeQuality, inspectHlsMaster2 = inspectHlsMaster, getMediaRequest2 = getMediaRequest;
   const { webcrypto } = require("crypto");
   const BASE_URL = "https://cinejoy.to";
   const API_URL = "https://api.shegu.st";
   const WASM_URL = `${API_URL}/crush.wasm`;
   const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
   const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
-  const REQUEST_HEADER = { "Content-Type": "text/plain;charset=UTF-8" };
+  const BROWSER_HEADERS = {
+    Accept: "application/json, text/plain, */*",
+    Origin: BASE_URL,
+    Referer: `${BASE_URL}/`,
+    "User-Agent": USER_AGENT
+  };
+  const REQUEST_HEADER = __spreadProps(__spreadValues({}, BROWSER_HEADERS), {
+    Accept: "*/*",
+    "Content-Type": "text/plain;charset=UTF-8"
+  });
   let wasmExportsPromise = null;
   let serversCache = null;
   let serversCacheAt = 0;
   const titleCache = /* @__PURE__ */ new Map();
+  let lastDiagnostics = { stage: "idle", at: null };
   function getWasmExports() {
     return __async(this, null, function* () {
       if (!wasmExportsPromise) {
@@ -528,7 +547,9 @@ if (!IS_SERVER) {
   function getServers() {
     return __async(this, null, function* () {
       if (serversCache && Date.now() - serversCacheAt < 5 * 60 * 1e3) return serversCache;
-      const response = yield fetchWithTimeout(`${API_URL}/servers`, {}, 5e3);
+      const response = yield fetchWithTimeout(`${API_URL}/servers`, {
+        headers: BROWSER_HEADERS
+      }, 8e3);
       if (!response.ok) throw new Error(`Cinejoy servers HTTP ${response.status}`);
       const payload = yield response.json();
       const servers = Array.isArray(payload) ? payload : payload == null ? void 0 : payload.servers;
@@ -565,30 +586,63 @@ if (!IS_SERVER) {
   }
   function inspectPlaylist(url, headers) {
     return __async(this, null, function* () {
-      const response = yield fetchWithTimeout(url, { headers }, 4e3);
-      if (!response.ok) throw new Error(`Cinejoy playlist HTTP ${response.status}`);
-      return inspectHlsMaster(yield response.text());
+      let lastError = null;
+      for (const requestHeaders of [headers, void 0]) {
+        try {
+          const response = yield fetchWithTimeout(
+            url,
+            requestHeaders ? { headers: requestHeaders } : {},
+            1e4
+          );
+          if (!response.ok) {
+            lastError = new Error(`Cinejoy playlist HTTP ${response.status}`);
+            continue;
+          }
+          return inspectHlsMaster(yield response.text());
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError || new Error("Cinejoy playlist check failed");
     });
   }
   function getServerStreams(server, mediaRequest, title) {
     return __async(this, null, function* () {
       const data = yield encryptedRequest(`/${server.name}/${mediaRequest.path}`, mediaRequest.payload);
       const entries = Array.isArray(data == null ? void 0 : data.stream) ? data.stream : [];
+      setDiagnostics("stream_response", { server: server.name, entries: entries.length });
       const headers = { Referer: `${BASE_URL}/`, "User-Agent": USER_AGENT };
       return Promise.all(entries.map((entry) => __async(null, null, function* () {
         const playlist = String((entry == null ? void 0 : entry.playlist) || "").trim();
-        if (!/^https?:\/\/[^\s]+\.m3u8(?:[?#].*)?$/i.test(playlist)) return null;
+        if (!/^https?:\/\/[^\s]+\.m3u8(?:[?#].*)?$/i.test(playlist)) {
+          setDiagnostics("invalid_playlist", { server: server.name });
+          return null;
+        }
         let playlistInfo = null;
         try {
           playlistInfo = yield inspectPlaylist(playlist, headers);
-        } catch (e) {
+        } catch (error) {
+          setDiagnostics("playlist_check_failed", { server: server.name, error: error.message });
           playlistInfo = null;
         }
         const quality = (playlistInfo == null ? void 0 : playlistInfo.quality) || (server["4k"] === true ? "4K" : "Unknown");
         const audioLanguages = (playlistInfo == null ? void 0 : playlistInfo.audioLanguages) || [];
         const availableQualities = (playlistInfo == null ? void 0 : playlistInfo.qualities) || [];
         const hasItalianAudio = audioLanguages.some((language) => /\bitalian\b/i.test(language));
-        if (!hasItalianAudio) return null;
+        setDiagnostics("playlist_checked", {
+          server: server.name,
+          quality,
+          audioTracks: audioLanguages.length,
+          italian: hasItalianAudio
+        });
+        if (!hasItalianAudio) {
+          setDiagnostics("playlist_rejected_no_italian", {
+            server: server.name,
+            qualities: availableQualities,
+            audioTracks: audioLanguages.length
+          });
+          return null;
+        }
         const streamLanguage = "Italian";
         const normalizedQuality = quality === "4K" ? "2160p" : quality;
         return formatStream({
@@ -608,10 +662,14 @@ if (!IS_SERVER) {
   }
   function getStreams(id, type, season, episode, providerContext = null) {
     return __async(this, null, function* () {
+      setDiagnostics("start", { id: String(id || ""), type: String(type || "") });
       const normalizedType = String(type || "").toLowerCase();
       if (!["movie", "tv", "series"].includes(normalizedType)) return [];
       const tmdbId = resolveTmdbId(id, providerContext);
-      if (!tmdbId) return [];
+      if (!tmdbId) {
+        setDiagnostics("invalid_tmdb_id");
+        return [];
+      }
       const isMovie = normalizedType === "movie";
       const effectiveSeason = Number.parseInt(String(season || ""), 10) || 1;
       const effectiveEpisode = Number.parseInt(String(episode || ""), 10) || 1;
@@ -622,20 +680,33 @@ if (!IS_SERVER) {
       let servers;
       try {
         servers = yield getServers();
-      } catch (e) {
+        setDiagnostics("servers_loaded", { count: servers.length });
+      } catch (error) {
+        console.warn(`[Cinejoy] Server list failed: ${error.message}`);
+        setDiagnostics("servers_failed", { error: error.message });
         return [];
       }
       const primaryServer = servers.find((server) => server["4k"] === true) || servers[0];
-      if (!primaryServer) return [];
+      if (!primaryServer) {
+        setDiagnostics("no_primary_server");
+        return [];
+      }
+      setDiagnostics("primary_server", { server: primaryServer.name });
       try {
-        return yield getServerStreams(primaryServer, mediaRequest, title);
-      } catch (e) {
+        const streams = yield getServerStreams(primaryServer, mediaRequest, title);
+        if (streams.length > 0) setDiagnostics("ok", { streams: streams.length });
+        return streams;
+      } catch (error) {
+        console.warn(`[Cinejoy] ${primaryServer.name} extraction failed: ${error.message}`);
+        setDiagnostics("extraction_failed", { server: primaryServer.name, error: error.message });
         return [];
       }
     });
   }
-  module.exports = { getStreams };
+  module.exports = { getStreams, getDiagnostics };
 }
+var setDiagnostics2;
+var getDiagnostics2;
 var fetchWithTimeout2;
 var resolveTmdbId2;
 var getTitleHint2;

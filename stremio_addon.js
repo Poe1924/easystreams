@@ -2678,6 +2678,7 @@ app.use('/', addonRouter);
 app.get('/resolve/:provider', async (req, res) => {
     const { provider: providerName } = req.params;
     const { id, type, s, ep, format } = req.query;
+    const debug = String(req.query.debug || '') === '1';
 
     if (!id || !type) {
         return res.status(400).json({ error: 'Missing parameters (id, type)' });
@@ -2703,7 +2704,13 @@ app.get('/resolve/:provider', async (req, res) => {
         if (format === 'links') {
             res.json({ links: result.links || [] });
         } else {
-            res.json({ streams: Array.isArray(result) ? result : (result.streams || []) });
+            const responsePayload = {
+                streams: Array.isArray(result) ? result : (result.streams || [])
+            };
+            if (debug && typeof provider.getDiagnostics === 'function') {
+                responsePayload.diagnostics = provider.getDiagnostics();
+            }
+            res.json(responsePayload);
         }
     } catch (e) {
         console.error(`[API] Errore risoluzione remota ${providerName}:`, e.message);
