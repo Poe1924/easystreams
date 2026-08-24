@@ -1,12 +1,11 @@
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 const BASE_URL = "https://altadefinizionestreaming.tv";
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+const CDN_PROBE_TIMEOUT_MS = 500;
 
 const SESSION_COOKIE = 'sid=32234dfabd14e587764e84405e75e99856c6bef31c6b1752e19897b8ae3d4a21';
 
-const { extractMixDrop } = require('../extractors/mixdrop');
 const { formatStream } = require('../formatter.js');
-const { checkQualityFromPlaylist } = require('../quality_helper.js');
 
 function getCookie() {
   try {
@@ -62,15 +61,6 @@ async function resolveTmdbId(id, type, providerContext = null) {
   return null;
 }
 
-function absoluteUrl(url) {
-  if (!url) return null;
-  try {
-    return new URL(String(url), BASE_URL).toString();
-  } catch {
-    return null;
-  }
-}
-
 async function getShowTitle(tmdbId, type) {
   const endpoint = String(type || "").toLowerCase() === "movie" ? "movie" : "tv";
   const payload = await fetchJson(`https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=it-IT`);
@@ -78,25 +68,25 @@ async function getShowTitle(tmdbId, type) {
   return payload.title || payload.name || payload.original_title || payload.original_name || null;
 }
 
-async function resolveDownloadToMixDrop(url, cookie) {
-  const downloadUrl = absoluteUrl(url);
-  if (!downloadUrl) return null;
-  const withGo = `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}go=1`;
+async function isCdnAllowedQuickly(url, headers) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CDN_PROBE_TIMEOUT_MS);
 
   try {
-    const headers = {
-      "User-Agent": USER_AGENT,
-      "Referer": `${BASE_URL}/`
-    };
-    if (cookie && withGo.startsWith(BASE_URL)) headers.Cookie = cookie;
-    const response = await fetch(withGo, { headers });
-    const finalUrl = String(response.url || "").replace(/\?download$/i, "");
-    if (/mixdrop|m1xdrop|mxdrop/i.test(finalUrl)) return finalUrl;
+    const response = await fetch(url, {
+      headers: { ...headers, Range: 'bytes=0-0' },
+      signal: controller.signal
+    });
+    if (response.body && typeof response.body.cancel === 'function') {
+      response.body.cancel().catch(() => {});
+    }
+    return response.status !== 403;
   } catch {
-    return null;
+    // Timeout/network error is non-blocking: keep default 720p stream.
+    return true;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return null;
 }
 
 async function addCdnStream(streams, tmdbId, type, season, episode, displayName, cookie) {
@@ -111,9 +101,7 @@ async function addCdnStream(streams, tmdbId, type, season, episode, displayName,
   if (!source?.url) return;
 
   const headers = { "User-Agent": USER_AGENT, "Referer": `${BASE_URL}/` };
-  let quality = "720p";
-  const detectedQuality = await checkQualityFromPlaylist(source.url, headers);
-  if (detectedQuality) quality = detectedQuality;
+  if (!await isCdnAllowedQuickly(source.url, headers)) return;
 
   streams.push({
     name: "AltadefinizioneStreaming - CDN",
@@ -121,41 +109,9 @@ async function addCdnStream(streams, tmdbId, type, season, episode, displayName,
     url: source.url,
     easyProxySourceUrl: endpoint,
     headers: headers,
-    quality: quality,
-    type: "direct",
-    language: ''
-  });
-}
-
-async function addMixDropStream(streams, tmdbId, type, season, episode, displayName, cookie) {
-  const normalizedType = String(type || "").toLowerCase();
-  let downloadEntry = null;
-
-  if (normalizedType === "movie") {
-    const payload = await fetchJson(`${BASE_URL}/api/download/${tmdbId}`, cookie);
-    if (payload?.available && payload?.url) downloadEntry = payload.url;
-  } else {
-    const payload = await fetchJson(`${BASE_URL}/api/download-episodes/${tmdbId}`, cookie);
-    const episodes = Array.isArray(payload?.episodes) ? payload.episodes : [];
-    const match = episodes.find(item => Number(item?.season) === Number(season) && Number(item?.episode) === Number(episode));
-    if (payload?.available && match?.url) downloadEntry = match.url;
-  }
-
-  const mixdropUrl = await resolveDownloadToMixDrop(downloadEntry, cookie);
-  if (!mixdropUrl) return;
-
-  const extracted = await extractMixDrop(mixdropUrl);
-  if (!extracted?.url) return;
-
-  streams.push({
-    name: "AltadefinizioneStreaming - MixDrop",
-    title: displayName,
-    url: extracted.url,
-    easyProxySourceUrl: mixdropUrl,
-    headers: extracted.headers,
     quality: "720p",
     type: "direct",
-    language: 'Italian'
+    language: ''
   });
 }
 
@@ -174,10 +130,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   const displayName = normalizedType === "movie" ? showTitle : `${showTitle} ${effectiveSeason}x${effectiveEpisode}`;
   const streams = [];
 
-  await Promise.all([
-    addCdnStream(streams, tmdbId, providerType, effectiveSeason, effectiveEpisode, displayName, cookie),
-    addMixDropStream(streams, tmdbId, providerType, effectiveSeason, effectiveEpisode, displayName, cookie)
-  ]);
+  await addCdnStream(streams, tmdbId, providerType, effectiveSeason, effectiveEpisode, displayName, cookie);
 
   return streams.map(s => formatStream(s, "AltadefinizioneStreaming")).filter(Boolean);
 }

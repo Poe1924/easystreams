@@ -1,11 +1,11 @@
 {
   "name": "EasyStreams",
-  "version": "1.3.36",
+  "version": "1.3.37",
   "scrapers": [
     {
       "id": "easystreams-pcc",
       "name": "PCC",
-      "version": "1.0.10",
+      "version": "1.0.11",
       "description": "Film, serie TV and anime from PCC",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -18,7 +18,7 @@
     {
       "id": "easystreams-guardoserie",
       "name": "Guardoserie",
-      "version": "1.1.32",
+      "version": "1.1.33",
       "description": "Movies and Series from Guardoserie",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -31,7 +31,7 @@
     {
       "id": "easystreams-animeunity",
       "name": "AnimeUnity",
-      "version": "1.1.20",
+      "version": "1.1.21",
       "description": "Anime from AnimeUnity",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -44,7 +44,7 @@
     {
       "id": "easystreams-animeworld",
       "name": "AnimeWorld",
-      "version": "1.1.13",
+      "version": "1.1.14",
       "description": "Anime from AnimeWorld",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -57,7 +57,7 @@
     {
       "id": "easystreams-animesaturn",
       "name": "AnimeSaturn",
-      "version": "1.0.15",
+      "version": "1.0.16",
       "description": "Anime from AnimeSaturn",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -70,7 +70,7 @@
     {
       "id": "easystreams-streamingcommunity",
       "name": "StreamingCommunity",
-      "version": "1.1.65",
+      "version": "1.1.66",
       "description": "Movies and Series from StreamingCommunity",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -83,7 +83,7 @@
     {
       "id": "easystreams-altadefinizionestreaming",
       "name": "AltadefinizioneStreaming",
-      "version": "1.0.9",
+      "version": "1.0.10",
       "description": "Movies and Series from AltadefinizioneStreaming",
       "resources": ["stream"],
       "contentLanguage": ["it"],
@@ -96,7 +96,7 @@
     {
       "id": "easystreams-cc",
       "name": "CinemaCity",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "description": "Movies and Series from CinemaCity",
       "resources": ["stream"],
       "contentLanguage": ["it", "en"],
@@ -109,7 +109,7 @@
     {
       "id": "easystreams-cinejoy",
       "name": "Cinejoy",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "description": "Movies and Series from Cinejoy (server resolver)",
       "resources": ["stream"],
       "contentLanguage": ["it"],
