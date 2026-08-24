@@ -383,12 +383,19 @@ global.fetch = async function (url, options = {}) {
         : null;
 
     try {
+        const urlString = typeof url === 'string'
+            ? url
+            : typeof url?.href === 'string'
+                ? url.href
+                : typeof url?.url === 'string'
+                    ? url.url
+                    : String(url);
         const proxyUrls = (process.env.ANIMEUNITY_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || '')
             .split(/[\s,;|]+/).map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
-        const useProxy = proxyUrls.length > 0 && typeof url === 'string' && url.includes('animeunity');
+        const useProxy = proxyUrls.length > 0 && urlString.includes('animeunity');
         const agent = useProxy && HttpsProxyAgent
             ? new HttpsProxyAgent(proxyUrls[Math.floor(Math.random() * proxyUrls.length)], { ...agentOptions })
-            : url.startsWith('https') ? httpsAgent : httpAgent;
+            : urlString.startsWith('https') ? httpsAgent : httpAgent;
         const transport = usesNativeUndiciFetch
             ? (fetchOptions.dispatcher || ipv4Dispatcher ? { dispatcher: fetchOptions.dispatcher || ipv4Dispatcher } : {})
             : { agent: fetchOptions.agent || agent };
