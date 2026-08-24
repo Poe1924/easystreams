@@ -37,6 +37,8 @@ let HttpsProxyAgent = null;
 try { HttpsProxyAgent = require('https-proxy-agent').HttpsProxyAgent; } catch {}
 let UndiciAgent = null;
 try { UndiciAgent = require('undici').Agent; } catch {}
+let UndiciProxyAgent = null;
+try { UndiciProxyAgent = require('undici').ProxyAgent; } catch {}
 
 const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase();
 const ENABLE_INFO_LOGS = ['debug', 'verbose', 'info'].includes(LOG_LEVEL);
@@ -105,6 +107,54 @@ const agentOptions = {
 
 const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
+const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
+    .split(/[\s,;|]+/)
+    .map(value => value.trim().replace(/\/+$/, ''))
+    .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+const providerProxyDispatchers = new Map();
+const providerProxyAgents = new Map();
+let providerProxyLogged = false;
+
+function getProviderProxyUrl() {
+    if (providerProxyUrls.length === 0) return '';
+    return providerProxyUrls[Math.floor(Math.random() * providerProxyUrls.length)];
+}
+
+function getProviderProxyDispatcher(proxyUrl) {
+    if (!UndiciProxyAgent || !proxyUrl) return null;
+    if (providerProxyDispatchers.has(proxyUrl)) return providerProxyDispatchers.get(proxyUrl);
+
+    try {
+        const dispatcher = new UndiciProxyAgent(proxyUrl);
+        providerProxyDispatchers.set(proxyUrl, dispatcher);
+        if (!providerProxyLogged) {
+            providerProxyLogged = true;
+            console.log('[Fetch] Using PROVIDER_PROXY for all outbound requests');
+        }
+        return dispatcher;
+    } catch (error) {
+        console.warn(`[Fetch] PROVIDER_PROXY init failed: ${error.message}`);
+        return null;
+    }
+}
+
+function getProviderProxyAgent(proxyUrl) {
+    if (!HttpsProxyAgent || !proxyUrl) return null;
+    if (providerProxyAgents.has(proxyUrl)) return providerProxyAgents.get(proxyUrl);
+
+    try {
+        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions });
+        providerProxyAgents.set(proxyUrl, agent);
+        if (!providerProxyLogged) {
+            providerProxyLogged = true;
+            console.log('[Fetch] Using PROVIDER_PROXY for all outbound requests');
+        }
+        return agent;
+    } catch (error) {
+        console.warn(`[Fetch] PROVIDER_PROXY init failed: ${error.message}`);
+        return null;
+    }
+}
 
 const { addonBuilder, serveHTTP, getRouter } = require('stremio-addon-sdk');
 const express = require('express');
@@ -368,7 +418,7 @@ function setCachedStreamResponse(cacheKey, response) {
     streamCacheBytes += payloadSize;
 }
 
-// Wrap global fetch to enforce timeout and optional per-domain proxy
+// Wrap global fetch to enforce timeout and centralized outbound proxy
 const originalFetch = global.fetch;
 const usesNativeUndiciFetch = Boolean(process.versions?.undici);
 const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
@@ -390,15 +440,13 @@ global.fetch = async function (url, options = {}) {
                 : typeof url?.url === 'string'
                     ? url.url
                     : String(url);
-        const proxyUrls = (process.env.ANIMEUNITY_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || '')
-            .split(/[\s,;|]+/).map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
-        const useProxy = proxyUrls.length > 0 && urlString.includes('animeunity');
-        const agent = useProxy && HttpsProxyAgent
-            ? new HttpsProxyAgent(proxyUrls[Math.floor(Math.random() * proxyUrls.length)], { ...agentOptions })
-            : urlString.startsWith('https') ? httpsAgent : httpAgent;
+        const proxyUrl = getProviderProxyUrl();
         const transport = usesNativeUndiciFetch
-            ? (fetchOptions.dispatcher || ipv4Dispatcher ? { dispatcher: fetchOptions.dispatcher || ipv4Dispatcher } : {})
-            : { agent: fetchOptions.agent || agent };
+            ? (() => {
+                const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
+                return dispatcher ? { dispatcher } : {};
+            })()
+            : { agent: fetchOptions.agent || getProviderProxyAgent(proxyUrl) || (urlString.startsWith('https') ? httpsAgent : httpAgent) };
         const response = await originalFetch(url, {
             ...fetchOptions,
             ...transport,
