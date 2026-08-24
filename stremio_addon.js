@@ -35,6 +35,8 @@ const https = require('https');
 const http = require('http');
 let HttpsProxyAgent = null;
 try { HttpsProxyAgent = require('https-proxy-agent').HttpsProxyAgent; } catch {}
+let UndiciAgent = null;
+try { UndiciAgent = require('undici').Agent; } catch {}
 
 const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase();
 const ENABLE_INFO_LOGS = ['debug', 'verbose', 'info'].includes(LOG_LEVEL);
@@ -368,16 +370,17 @@ function setCachedStreamResponse(cacheKey, response) {
 
 // Wrap global fetch to enforce timeout and optional per-domain proxy
 const originalFetch = global.fetch;
-global.fetch = async function (url, options = {}) {
-    // If a signal is already provided, respect it
-    if (options.signal) {
-        return originalFetch(url, options);
-    }
+const usesNativeUndiciFetch = Boolean(process.versions?.undici);
+const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
+    ? new UndiciAgent({ connect: { family: 4 } })
+    : null;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-        controller.abort();
-    }, options.timeout || FETCH_TIMEOUT);
+global.fetch = async function (url, options = {}) {
+    const { timeout, ...fetchOptions } = options;
+    const controller = options.signal ? null : new AbortController();
+    const timeoutId = controller
+        ? setTimeout(() => controller.abort(), timeout || FETCH_TIMEOUT)
+        : null;
 
     try {
         const proxyUrls = (process.env.ANIMEUNITY_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || '')
@@ -386,10 +389,13 @@ global.fetch = async function (url, options = {}) {
         const agent = useProxy && HttpsProxyAgent
             ? new HttpsProxyAgent(proxyUrls[Math.floor(Math.random() * proxyUrls.length)], { ...agentOptions })
             : url.startsWith('https') ? httpsAgent : httpAgent;
+        const transport = usesNativeUndiciFetch
+            ? (fetchOptions.dispatcher || ipv4Dispatcher ? { dispatcher: fetchOptions.dispatcher || ipv4Dispatcher } : {})
+            : { agent: fetchOptions.agent || agent };
         const response = await originalFetch(url, {
-            ...options,
-            agent,
-            signal: controller.signal
+            ...fetchOptions,
+            ...transport,
+            ...(controller ? { signal: controller.signal } : {})
         });
         return response;
     } catch (error) {
@@ -407,13 +413,13 @@ global.fetch = async function (url, options = {}) {
                 syscall: error?.cause?.syscall || null
             });
         }
-        if (error.name === 'AbortError') {
+        if (error?.name === 'AbortError' && controller) {
             // Re-throw as a timeout error for clarity if aborted by our timeout
-            throw new Error(`Request to ${url} timed out after ${options.timeout || FETCH_TIMEOUT}ms`);
+            throw new Error(`Request to ${url} timed out after ${timeout || FETCH_TIMEOUT}ms`);
         }
         throw error;
     } finally {
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
     }
 };
 
