@@ -37,6 +37,24 @@ let wasmExportsPromise = null;
 let serversCache = null;
 let serversCacheAt = 0;
 const titleCache = new Map();
+let lastDiagnostics = { stage: 'idle', at: null };
+
+function setDiagnostics(stage, details = {}) {
+  lastDiagnostics = {
+    stage,
+    at: new Date().toISOString(),
+    ...details
+  };
+  const summary = Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(',') : value}`)
+    .join(' ');
+  console.log(`[Cinejoy] ${stage}${summary ? ` ${summary}` : ''}`);
+}
+
+function getDiagnostics() {
+  return { ...lastDiagnostics };
+}
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();
@@ -284,9 +302,24 @@ function inspectHlsMaster(text) {
 }
 
 async function inspectPlaylist(url, headers) {
-  const response = await fetchWithTimeout(url, { headers }, 4000);
-  if (!response.ok) throw new Error(`Cinejoy playlist HTTP ${response.status}`);
-  return inspectHlsMaster(await response.text());
+  let lastError = null;
+  for (const requestHeaders of [headers, undefined]) {
+    try {
+      const response = await fetchWithTimeout(
+        url,
+        requestHeaders ? { headers: requestHeaders } : {},
+        10000
+      );
+      if (!response.ok) {
+        lastError = new Error(`Cinejoy playlist HTTP ${response.status}`);
+        continue;
+      }
+      return inspectHlsMaster(await response.text());
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Cinejoy playlist check failed');
 }
 
 function getMediaRequest(type, tmdbId, season, episode) {
@@ -302,16 +335,21 @@ function getMediaRequest(type, tmdbId, season, episode) {
 async function getServerStreams(server, mediaRequest, title) {
   const data = await encryptedRequest(`/${server.name}/${mediaRequest.path}`, mediaRequest.payload);
   const entries = Array.isArray(data?.stream) ? data.stream : [];
+  setDiagnostics('stream_response', { server: server.name, entries: entries.length });
   const headers = { Referer: `${BASE_URL}/`, 'User-Agent': USER_AGENT };
 
   return Promise.all(entries.map(async entry => {
     const playlist = String(entry?.playlist || '').trim();
-    if (!/^https?:\/\/[^\s]+\.m3u8(?:[?#].*)?$/i.test(playlist)) return null;
+    if (!/^https?:\/\/[^\s]+\.m3u8(?:[?#].*)?$/i.test(playlist)) {
+      setDiagnostics('invalid_playlist', { server: server.name });
+      return null;
+    }
 
     let playlistInfo = null;
     try {
       playlistInfo = await inspectPlaylist(playlist, headers);
-    } catch {
+    } catch (error) {
+      setDiagnostics('playlist_check_failed', { server: server.name, error: error.message });
       playlistInfo = null;
     }
 
@@ -319,7 +357,20 @@ async function getServerStreams(server, mediaRequest, title) {
     const audioLanguages = playlistInfo?.audioLanguages || [];
     const availableQualities = playlistInfo?.qualities || [];
     const hasItalianAudio = audioLanguages.some(language => /\bitalian\b/i.test(language));
-    if (!hasItalianAudio) return null;
+    setDiagnostics('playlist_checked', {
+      server: server.name,
+      quality,
+      audioTracks: audioLanguages.length,
+      italian: hasItalianAudio
+    });
+    if (!hasItalianAudio) {
+      setDiagnostics('playlist_rejected_no_italian', {
+        server: server.name,
+        qualities: availableQualities,
+        audioTracks: audioLanguages.length
+      });
+      return null;
+    }
 
     const streamLanguage = 'Italian';
     const normalizedQuality = quality === '4K' ? '2160p' : quality;
@@ -340,11 +391,15 @@ async function getServerStreams(server, mediaRequest, title) {
 }
 
 async function getStreams(id, type, season, episode, providerContext = null) {
+  setDiagnostics('start', { id: String(id || ''), type: String(type || '') });
   const normalizedType = String(type || '').toLowerCase();
   if (!['movie', 'tv', 'series'].includes(normalizedType)) return [];
 
   const tmdbId = resolveTmdbId(id, providerContext);
-  if (!tmdbId) return [];
+  if (!tmdbId) {
+    setDiagnostics('invalid_tmdb_id');
+    return [];
+  }
 
   const isMovie = normalizedType === 'movie';
   const effectiveSeason = Number.parseInt(String(season || ''), 10) || 1;
@@ -357,7 +412,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   let servers;
   try {
     servers = await getServers();
-  } catch {
+    setDiagnostics('servers_loaded', { count: servers.length });
+  } catch (error) {
+    console.warn(`[Cinejoy] Server list failed: ${error.message}`);
+    setDiagnostics('servers_failed', { error: error.message });
     return [];
   }
 
@@ -365,14 +423,22 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   // Return only that source; the remaining servers are fallbacks and should
   // not appear as separate streams in Stremio/Nuvio.
   const primaryServer = servers.find(server => server['4k'] === true) || servers[0];
-  if (!primaryServer) return [];
+  if (!primaryServer) {
+    setDiagnostics('no_primary_server');
+    return [];
+  }
+  setDiagnostics('primary_server', { server: primaryServer.name });
 
   try {
-    return await getServerStreams(primaryServer, mediaRequest, title);
-  } catch {
+    const streams = await getServerStreams(primaryServer, mediaRequest, title);
+    if (streams.length > 0) setDiagnostics('ok', { streams: streams.length });
+    return streams;
+  } catch (error) {
+    console.warn(`[Cinejoy] ${primaryServer.name} extraction failed: ${error.message}`);
+    setDiagnostics('extraction_failed', { server: primaryServer.name, error: error.message });
     return [];
   }
 }
 
-module.exports = { getStreams };
+module.exports = { getStreams, getDiagnostics };
 }
