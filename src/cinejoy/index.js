@@ -31,7 +31,17 @@ const API_URL = 'https://api.shegu.st';
 const WASM_URL = `${API_URL}/crush.wasm`;
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
-const REQUEST_HEADER = { 'Content-Type': 'text/plain;charset=UTF-8' };
+const BROWSER_HEADERS = {
+  Accept: 'application/json, text/plain, */*',
+  Origin: BASE_URL,
+  Referer: `${BASE_URL}/`,
+  'User-Agent': USER_AGENT
+};
+const REQUEST_HEADER = {
+  ...BROWSER_HEADERS,
+  Accept: '*/*',
+  'Content-Type': 'text/plain;charset=UTF-8'
+};
 
 let wasmExportsPromise = null;
 let serversCache = null;
@@ -180,7 +190,9 @@ async function encryptedRequest(path, payload) {
 async function getServers() {
   if (serversCache && Date.now() - serversCacheAt < 5 * 60 * 1000) return serversCache;
 
-  const response = await fetchWithTimeout(`${API_URL}/servers`, {}, 5000);
+  const response = await fetchWithTimeout(`${API_URL}/servers`, {
+    headers: BROWSER_HEADERS
+  }, 8000);
   if (!response.ok) throw new Error(`Cinejoy servers HTTP ${response.status}`);
   const payload = await response.json();
   const servers = Array.isArray(payload) ? payload : payload?.servers;

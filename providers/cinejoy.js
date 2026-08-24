@@ -425,7 +425,16 @@ if (!IS_SERVER) {
   const WASM_URL = `${API_URL}/crush.wasm`;
   const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
   const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
-  const REQUEST_HEADER = { "Content-Type": "text/plain;charset=UTF-8" };
+  const BROWSER_HEADERS = {
+    Accept: "application/json, text/plain, */*",
+    Origin: BASE_URL,
+    Referer: `${BASE_URL}/`,
+    "User-Agent": USER_AGENT
+  };
+  const REQUEST_HEADER = __spreadProps(__spreadValues({}, BROWSER_HEADERS), {
+    Accept: "*/*",
+    "Content-Type": "text/plain;charset=UTF-8"
+  });
   let wasmExportsPromise = null;
   let serversCache = null;
   let serversCacheAt = 0;
@@ -538,7 +547,9 @@ if (!IS_SERVER) {
   function getServers() {
     return __async(this, null, function* () {
       if (serversCache && Date.now() - serversCacheAt < 5 * 60 * 1e3) return serversCache;
-      const response = yield fetchWithTimeout(`${API_URL}/servers`, {}, 5e3);
+      const response = yield fetchWithTimeout(`${API_URL}/servers`, {
+        headers: BROWSER_HEADERS
+      }, 8e3);
       if (!response.ok) throw new Error(`Cinejoy servers HTTP ${response.status}`);
       const payload = yield response.json();
       const servers = Array.isArray(payload) ? payload : payload == null ? void 0 : payload.servers;
