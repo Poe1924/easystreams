@@ -7303,7 +7303,8 @@ var require_loadm = __commonJS({
               "User-Agent": USER_AGENT2,
               "Referer": baseUrl,
               "X-Requested-With": "XMLHttpRequest"
-            }
+            },
+            provider: "loadm"
           });
           if (!response.ok) {
             const errorBody = yield response.text().catch(() => "");
@@ -8053,7 +8054,7 @@ function normalizeEpisodesList(sourceEpisodes = []) {
 function fetchWithTimeout(_0) {
   return __async(this, arguments, function* (url, options = {}, timeoutMs = FETCH_TIMEOUT) {
     const timeoutConfig = createTimeoutSignal(timeoutMs);
-    const requestOptions = __spreadValues({}, options);
+    const requestOptions = __spreadProps(__spreadValues({}, options), { provider: "animeunity" });
     if (timeoutConfig.signal) {
       if (requestOptions.signal && typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
         requestOptions.signal = AbortSignal.any([requestOptions.signal, timeoutConfig.signal]);

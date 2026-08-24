@@ -114,6 +114,7 @@ const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
 const providerProxyDispatchers = new Map();
 const providerProxyAgents = new Map();
 let providerProxyLogged = false;
+const PROVIDER_PROXY_NAMES = new Set(['animeunity', 'cinejoy', 'loadm']);
 
 function getProviderProxyUrl() {
     if (providerProxyUrls.length === 0) return '';
@@ -129,7 +130,7 @@ function getProviderProxyDispatcher(proxyUrl) {
         providerProxyDispatchers.set(proxyUrl, dispatcher);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
-            console.log('[Fetch] Using PROVIDER_PROXY for all outbound requests');
+            console.log('[Fetch] Using PROVIDER_PROXY for AnimeUnity/Cinejoy/Loadm');
         }
         return dispatcher;
     } catch (error) {
@@ -147,12 +148,27 @@ function getProviderProxyAgent(proxyUrl) {
         providerProxyAgents.set(proxyUrl, agent);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
-            console.log('[Fetch] Using PROVIDER_PROXY for all outbound requests');
+            console.log('[Fetch] Using PROVIDER_PROXY for AnimeUnity/Cinejoy/Loadm');
         }
         return agent;
     } catch (error) {
         console.warn(`[Fetch] PROVIDER_PROXY init failed: ${error.message}`);
         return null;
+    }
+}
+
+function shouldUseProviderProxy(urlString, provider) {
+    const providerName = String(provider || '').trim().toLowerCase();
+    if (PROVIDER_PROXY_NAMES.has(providerName)) return true;
+
+    try {
+        const hostname = new URL(urlString).hostname.toLowerCase();
+        return hostname.includes('animeunity') ||
+            hostname === 'cinejoy.to' || hostname.endsWith('.cinejoy.to') ||
+            /(^|\.)loadm(?:\.|$)/i.test(hostname) ||
+            hostname === 'api.shegu.st';
+    } catch {
+        return false;
     }
 }
 
@@ -426,7 +442,7 @@ const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
     : null;
 
 global.fetch = async function (url, options = {}) {
-    const { timeout, ...fetchOptions } = options;
+    const { timeout, provider, ...fetchOptions } = options;
     const controller = options.signal ? null : new AbortController();
     const timeoutId = controller
         ? setTimeout(() => controller.abort(), timeout || FETCH_TIMEOUT)
@@ -440,7 +456,7 @@ global.fetch = async function (url, options = {}) {
                 : typeof url?.url === 'string'
                     ? url.url
                     : String(url);
-        const proxyUrl = getProviderProxyUrl();
+        const proxyUrl = shouldUseProviderProxy(urlString, provider) ? getProviderProxyUrl() : '';
         const transport = usesNativeUndiciFetch
             ? (() => {
                 const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;

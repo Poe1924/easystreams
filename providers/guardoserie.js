@@ -7517,7 +7517,8 @@ var require_loadm = __commonJS({
               "User-Agent": USER_AGENT,
               "Referer": baseUrl,
               "X-Requested-With": "XMLHttpRequest"
-            }
+            },
+            provider: "loadm"
           });
           if (!response.ok) {
             const errorBody = yield response.text().catch(() => "");

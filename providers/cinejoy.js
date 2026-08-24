@@ -343,7 +343,7 @@ if (!IS_SERVER) {
   }, fetchWithTimeout = function(url, options = {}, timeoutMs = 5e3) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, __spreadProps(__spreadValues({}, options), { signal: controller.signal })).finally(() => clearTimeout(timer));
+    return fetch(url, __spreadProps(__spreadValues({}, options), { provider: "cinejoy", signal: controller.signal })).finally(() => clearTimeout(timer));
   }, resolveTmdbId = function(id, providerContext = null) {
     const contextId = String((providerContext == null ? void 0 : providerContext.tmdbId) || "").trim();
     if (/^\d+$/.test(contextId)) return contextId;

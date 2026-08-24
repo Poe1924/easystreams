@@ -26,7 +26,8 @@ async function extractLoadm(playerUrl, referer = 'guardoserie.horse') {
                 'User-Agent': USER_AGENT,
                 'Referer': baseUrl,
                 'X-Requested-With': 'XMLHttpRequest'
-            }
+            },
+            provider: 'loadm'
         });
 
         if (!response.ok) {
