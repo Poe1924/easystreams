@@ -462,7 +462,7 @@ function normalizeEpisodesList(sourceEpisodes = []) {
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT) {
   const timeoutConfig = createTimeoutSignal(timeoutMs);
-  const requestOptions = { ...options };
+  const requestOptions = { ...options, provider: "animeunity" };
   if (timeoutConfig.signal) {
     if (
       requestOptions.signal &&

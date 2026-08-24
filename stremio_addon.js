@@ -35,6 +35,10 @@ const https = require('https');
 const http = require('http');
 let HttpsProxyAgent = null;
 try { HttpsProxyAgent = require('https-proxy-agent').HttpsProxyAgent; } catch {}
+let UndiciAgent = null;
+try { UndiciAgent = require('undici').Agent; } catch {}
+let UndiciProxyAgent = null;
+try { UndiciProxyAgent = require('undici').ProxyAgent; } catch {}
 
 const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase();
 const ENABLE_INFO_LOGS = ['debug', 'verbose', 'info'].includes(LOG_LEVEL);
@@ -103,6 +107,70 @@ const agentOptions = {
 
 const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
+const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
+    .split(/[\s,;|]+/)
+    .map(value => value.trim().replace(/\/+$/, ''))
+    .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+const providerProxyDispatchers = new Map();
+const providerProxyAgents = new Map();
+let providerProxyLogged = false;
+const PROVIDER_PROXY_NAMES = new Set(['animeunity', 'cinejoy', 'loadm']);
+
+function getProviderProxyUrl() {
+    if (providerProxyUrls.length === 0) return '';
+    return providerProxyUrls[Math.floor(Math.random() * providerProxyUrls.length)];
+}
+
+function getProviderProxyDispatcher(proxyUrl) {
+    if (!UndiciProxyAgent || !proxyUrl) return null;
+    if (providerProxyDispatchers.has(proxyUrl)) return providerProxyDispatchers.get(proxyUrl);
+
+    try {
+        const dispatcher = new UndiciProxyAgent(proxyUrl);
+        providerProxyDispatchers.set(proxyUrl, dispatcher);
+        if (!providerProxyLogged) {
+            providerProxyLogged = true;
+            console.log('[Fetch] Using PROVIDER_PROXY for AnimeUnity/Cinejoy/Loadm');
+        }
+        return dispatcher;
+    } catch (error) {
+        console.warn(`[Fetch] PROVIDER_PROXY init failed: ${error.message}`);
+        return null;
+    }
+}
+
+function getProviderProxyAgent(proxyUrl) {
+    if (!HttpsProxyAgent || !proxyUrl) return null;
+    if (providerProxyAgents.has(proxyUrl)) return providerProxyAgents.get(proxyUrl);
+
+    try {
+        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions });
+        providerProxyAgents.set(proxyUrl, agent);
+        if (!providerProxyLogged) {
+            providerProxyLogged = true;
+            console.log('[Fetch] Using PROVIDER_PROXY for AnimeUnity/Cinejoy/Loadm');
+        }
+        return agent;
+    } catch (error) {
+        console.warn(`[Fetch] PROVIDER_PROXY init failed: ${error.message}`);
+        return null;
+    }
+}
+
+function shouldUseProviderProxy(urlString, provider) {
+    const providerName = String(provider || '').trim().toLowerCase();
+    if (PROVIDER_PROXY_NAMES.has(providerName)) return true;
+
+    try {
+        const hostname = new URL(urlString).hostname.toLowerCase();
+        return hostname.includes('animeunity') ||
+            hostname === 'cinejoy.to' || hostname.endsWith('.cinejoy.to') ||
+            /(^|\.)loadm(?:\.|$)/i.test(hostname) ||
+            hostname === 'api.shegu.st';
+    } catch {
+        return false;
+    }
+}
 
 const { addonBuilder, serveHTTP, getRouter } = require('stremio-addon-sdk');
 const express = require('express');
@@ -366,30 +434,39 @@ function setCachedStreamResponse(cacheKey, response) {
     streamCacheBytes += payloadSize;
 }
 
-// Wrap global fetch to enforce timeout and optional per-domain proxy
+// Wrap global fetch to enforce timeout and centralized outbound proxy
 const originalFetch = global.fetch;
-global.fetch = async function (url, options = {}) {
-    // If a signal is already provided, respect it
-    if (options.signal) {
-        return originalFetch(url, options);
-    }
+const usesNativeUndiciFetch = Boolean(process.versions?.undici);
+const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
+    ? new UndiciAgent({ connect: { family: 4 } })
+    : null;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-        controller.abort();
-    }, options.timeout || FETCH_TIMEOUT);
+global.fetch = async function (url, options = {}) {
+    const { timeout, provider, ...fetchOptions } = options;
+    const controller = options.signal ? null : new AbortController();
+    const timeoutId = controller
+        ? setTimeout(() => controller.abort(), timeout || FETCH_TIMEOUT)
+        : null;
 
     try {
-        const proxyUrls = (process.env.ANIMEUNITY_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || '')
-            .split(/[\s,;|]+/).map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
-        const useProxy = proxyUrls.length > 0 && typeof url === 'string' && url.includes('animeunity');
-        const agent = useProxy && HttpsProxyAgent
-            ? new HttpsProxyAgent(proxyUrls[Math.floor(Math.random() * proxyUrls.length)], { ...agentOptions })
-            : url.startsWith('https') ? httpsAgent : httpAgent;
+        const urlString = typeof url === 'string'
+            ? url
+            : typeof url?.href === 'string'
+                ? url.href
+                : typeof url?.url === 'string'
+                    ? url.url
+                    : String(url);
+        const proxyUrl = shouldUseProviderProxy(urlString, provider) ? getProviderProxyUrl() : '';
+        const transport = usesNativeUndiciFetch
+            ? (() => {
+                const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
+                return dispatcher ? { dispatcher } : {};
+            })()
+            : { agent: fetchOptions.agent || getProviderProxyAgent(proxyUrl) || (urlString.startsWith('https') ? httpsAgent : httpAgent) };
         const response = await originalFetch(url, {
-            ...options,
-            agent,
-            signal: controller.signal
+            ...fetchOptions,
+            ...transport,
+            ...(controller ? { signal: controller.signal } : {})
         });
         return response;
     } catch (error) {
@@ -407,13 +484,13 @@ global.fetch = async function (url, options = {}) {
                 syscall: error?.cause?.syscall || null
             });
         }
-        if (error.name === 'AbortError') {
+        if (error?.name === 'AbortError' && controller) {
             // Re-throw as a timeout error for clarity if aborted by our timeout
-            throw new Error(`Request to ${url} timed out after ${options.timeout || FETCH_TIMEOUT}ms`);
+            throw new Error(`Request to ${url} timed out after ${timeout || FETCH_TIMEOUT}ms`);
         }
         throw error;
     } finally {
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
     }
 };
 
