@@ -7788,6 +7788,7 @@ var require_guardoserie = __commonJS({
       const { USER_AGENT, getProxiedUrl } = require_common();
       const { extractLoadm } = require_loadm();
       const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
+      const GUARDOSERIE_SEARCH_TIMEOUT_MS = 2e3;
       const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
       let guardoserieBaseUrl = null;
       let guardoserieConfigLoaded = false;
@@ -8002,7 +8003,10 @@ var require_guardoserie = __commonJS({
               return [...new Set(results)].filter((q2) => q2.length > 2);
             };
             const allQueries = [.../* @__PURE__ */ new Set([...genQueries(title), ...genQueries(originalTitle)])].slice(0, 5);
+            const searchDeadline = Date.now() + GUARDOSERIE_SEARCH_TIMEOUT_MS;
             const searchProvider = (query) => __async(null, null, function* () {
+              const remainingTimeout = searchDeadline - Date.now();
+              if (remainingTimeout <= 0) return [];
               const searchStartedAt = Date.now();
               const searchUrl = `${baseUrl}/wp-admin/admin-ajax.php`;
               const enc = (s) => encodeURIComponent(s).replace(/%20/g, "+");
@@ -8019,7 +8023,7 @@ var require_guardoserie = __commonJS({
                   },
                   provider: "guardoserie",
                   skipBypassOnFailure: true,
-                  timeout: 3e3
+                  timeout: remainingTimeout
                 });
                 const results = extractSearchResultsFromHtml2(ajaxHtml, baseUrl);
                 mark("search_ajax", { q: query, ms: Date.now() - searchStartedAt, results: results.length });
@@ -8034,8 +8038,10 @@ var require_guardoserie = __commonJS({
               allResults = results.find((r) => r && r.length > 0) || [];
             }
             mark("search_done", { queries: allQueries.length, results: allResults.length });
-            if (allResults.length === 0 && allQueries.length > 0) {
+            if (allResults.length === 0 && allQueries.length > 0 && Date.now() < searchDeadline) {
               for (const query of allQueries.slice(0, 3)) {
+                const remainingTimeout = searchDeadline - Date.now();
+                if (remainingTimeout <= 0) break;
                 try {
                   const wpUrl = `${baseUrl}/?s=${encodeURIComponent(query)}`;
                   const wpHtml = yield smartFetch(wpUrl, baseUrl, {
@@ -8043,7 +8049,9 @@ var require_guardoserie = __commonJS({
                       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                       "Referer": `${baseUrl}/`
                     },
-                    provider: "guardoserie"
+                    provider: "guardoserie",
+                    skipBypassOnFailure: true,
+                    timeout: remainingTimeout
                   });
                   const wpResults = extractSearchResultsFromHtml2(wpHtml, baseUrl);
                   if (wpResults.length > 0) {
@@ -12984,10 +12992,9 @@ var require_altadefinizionestreaming = __commonJS({
     var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
     var BASE_URL = "https://altadefinizionestreaming.tv";
     var USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+    var CDN_PROBE_TIMEOUT_MS = 500;
     var SESSION_COOKIE = "sid=32234dfabd14e587764e84405e75e99856c6bef31c6b1752e19897b8ae3d4a21";
-    var { extractMixDrop } = require_mixdrop();
     var { formatStream } = require_formatter();
-    var { checkQualityFromPlaylist } = require_quality_helper();
     function getCookie() {
       var _a, _b;
       try {
@@ -13036,14 +13043,6 @@ var require_altadefinizionestreaming = __commonJS({
         return null;
       });
     }
-    function absoluteUrl(url) {
-      if (!url) return null;
-      try {
-        return new URL(String(url), BASE_URL).toString();
-      } catch (e) {
-        return null;
-      }
-    }
     function getShowTitle(tmdbId, type) {
       return __async(this, null, function* () {
         const endpoint = String(type || "").toLowerCase() === "movie" ? "movie" : "tv";
@@ -13052,24 +13051,25 @@ var require_altadefinizionestreaming = __commonJS({
         return payload.title || payload.name || payload.original_title || payload.original_name || null;
       });
     }
-    function resolveDownloadToMixDrop(url, cookie) {
+    function isCdnAllowedQuickly(url, headers) {
       return __async(this, null, function* () {
-        const downloadUrl = absoluteUrl(url);
-        if (!downloadUrl) return null;
-        const withGo = `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}go=1`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), CDN_PROBE_TIMEOUT_MS);
         try {
-          const headers = {
-            "User-Agent": USER_AGENT,
-            "Referer": `${BASE_URL}/`
-          };
-          if (cookie && withGo.startsWith(BASE_URL)) headers.Cookie = cookie;
-          const response = yield fetch(withGo, { headers });
-          const finalUrl = String(response.url || "").replace(/\?download$/i, "");
-          if (/mixdrop|m1xdrop|mxdrop/i.test(finalUrl)) return finalUrl;
+          const response = yield fetch(url, {
+            headers: __spreadProps(__spreadValues({}, headers), { Range: "bytes=0-0" }),
+            signal: controller.signal
+          });
+          if (response.body && typeof response.body.cancel === "function") {
+            response.body.cancel().catch(() => {
+            });
+          }
+          return response.status !== 403;
         } catch (e) {
-          return null;
+          return true;
+        } finally {
+          clearTimeout(timeoutId);
         }
-        return null;
       });
     }
     function addCdnStream(streams, tmdbId, type, season, episode, displayName, cookie) {
@@ -13082,47 +13082,16 @@ var require_altadefinizionestreaming = __commonJS({
         const source = ((_a = payload == null ? void 0 : payload.sources) == null ? void 0 : _a.find((s) => String((s == null ? void 0 : s.provider) || "").toLowerCase() === "cdn" && isAllowed(s))) || ((_b = payload == null ? void 0 : payload.sources) == null ? void 0 : _b.find((s) => isAllowed(s)));
         if (!(source == null ? void 0 : source.url)) return;
         const headers = { "User-Agent": USER_AGENT, "Referer": `${BASE_URL}/` };
-        let quality = "720p";
-        const detectedQuality = yield checkQualityFromPlaylist(source.url, headers);
-        if (detectedQuality) quality = detectedQuality;
+        if (!(yield isCdnAllowedQuickly(source.url, headers))) return;
         streams.push({
           name: "AltadefinizioneStreaming - CDN",
           title: displayName,
           url: source.url,
           easyProxySourceUrl: endpoint,
           headers,
-          quality,
-          type: "direct",
-          language: ""
-        });
-      });
-    }
-    function addMixDropStream(streams, tmdbId, type, season, episode, displayName, cookie) {
-      return __async(this, null, function* () {
-        const normalizedType = String(type || "").toLowerCase();
-        let downloadEntry = null;
-        if (normalizedType === "movie") {
-          const payload = yield fetchJson(`${BASE_URL}/api/download/${tmdbId}`, cookie);
-          if ((payload == null ? void 0 : payload.available) && (payload == null ? void 0 : payload.url)) downloadEntry = payload.url;
-        } else {
-          const payload = yield fetchJson(`${BASE_URL}/api/download-episodes/${tmdbId}`, cookie);
-          const episodes = Array.isArray(payload == null ? void 0 : payload.episodes) ? payload.episodes : [];
-          const match = episodes.find((item) => Number(item == null ? void 0 : item.season) === Number(season) && Number(item == null ? void 0 : item.episode) === Number(episode));
-          if ((payload == null ? void 0 : payload.available) && (match == null ? void 0 : match.url)) downloadEntry = match.url;
-        }
-        const mixdropUrl = yield resolveDownloadToMixDrop(downloadEntry, cookie);
-        if (!mixdropUrl) return;
-        const extracted = yield extractMixDrop(mixdropUrl);
-        if (!(extracted == null ? void 0 : extracted.url)) return;
-        streams.push({
-          name: "AltadefinizioneStreaming - MixDrop",
-          title: displayName,
-          url: extracted.url,
-          easyProxySourceUrl: mixdropUrl,
-          headers: extracted.headers,
           quality: "720p",
           type: "direct",
-          language: "Italian"
+          language: ""
         });
       });
     }
@@ -13139,10 +13108,7 @@ var require_altadefinizionestreaming = __commonJS({
         const showTitle = (yield getShowTitle(tmdbId, providerType)) || (normalizedType === "movie" ? "Film" : "Serie");
         const displayName = normalizedType === "movie" ? showTitle : `${showTitle} ${effectiveSeason}x${effectiveEpisode}`;
         const streams = [];
-        yield Promise.all([
-          addCdnStream(streams, tmdbId, providerType, effectiveSeason, effectiveEpisode, displayName, cookie),
-          addMixDropStream(streams, tmdbId, providerType, effectiveSeason, effectiveEpisode, displayName, cookie)
-        ]);
+        yield addCdnStream(streams, tmdbId, providerType, effectiveSeason, effectiveEpisode, displayName, cookie);
         return streams.map((s) => formatStream(s, "AltadefinizioneStreaming")).filter(Boolean);
       });
     }

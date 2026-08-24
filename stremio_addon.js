@@ -334,6 +334,7 @@ const STREAM_RESPONSE_TIMEOUT = 45000;
 const DEFAULT_PROVIDER_TIMEOUT = 40000;
 const PROVIDER_TIMEOUT = 40000;
 const ANIME_PROVIDER_TIMEOUT = 40000;
+const PROVIDER_TIMEOUT_OVERRIDES = Object.freeze({ guardoserie: 2000 });
 const ANIME_STREAM_RESPONSE_TIMEOUT = 45000;
 const ENABLE_SERIES_MAPPING_LOOKUP = false;
 const ENABLE_ANIME_FALLBACK_ON_SERIES = false;
@@ -2225,7 +2226,7 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
 
                 logVerbose(`[${name}] Searching...`);
 
-                const providerTimeoutMs = PROVIDER_TIMEOUT;
+                const providerTimeoutMs = PROVIDER_TIMEOUT_OVERRIDES[name] || PROVIDER_TIMEOUT;
 
                 let timeoutId;
                 const timeoutPromise = new Promise((resolve) => {
