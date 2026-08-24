@@ -7786,6 +7786,7 @@ if (!IS_SERVER) {
   const { USER_AGENT, getProxiedUrl } = require_common();
   const { extractLoadm } = require_loadm();
   const STEP_BENCH_ENABLED = String(process.env.PROVIDER_STEP_BENCH || "").trim().toLowerCase() === "1";
+  const GUARDOSERIE_SEARCH_TIMEOUT_MS = 2e3;
   const GUARDOSERIE_CONFIG_URL = "https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json";
   let guardoserieBaseUrl = null;
   let guardoserieConfigLoaded = false;
@@ -8000,7 +8001,10 @@ if (!IS_SERVER) {
           return [...new Set(results)].filter((q2) => q2.length > 2);
         };
         const allQueries = [.../* @__PURE__ */ new Set([...genQueries(title), ...genQueries(originalTitle)])].slice(0, 5);
+        const searchDeadline = Date.now() + GUARDOSERIE_SEARCH_TIMEOUT_MS;
         const searchProvider = (query) => __async(null, null, function* () {
+          const remainingTimeout = searchDeadline - Date.now();
+          if (remainingTimeout <= 0) return [];
           const searchStartedAt = Date.now();
           const searchUrl = `${baseUrl}/wp-admin/admin-ajax.php`;
           const enc = (s) => encodeURIComponent(s).replace(/%20/g, "+");
@@ -8017,7 +8021,7 @@ if (!IS_SERVER) {
               },
               provider: "guardoserie",
               skipBypassOnFailure: true,
-              timeout: 3e3
+              timeout: remainingTimeout
             });
             const results = extractSearchResultsFromHtml(ajaxHtml, baseUrl);
             mark("search_ajax", { q: query, ms: Date.now() - searchStartedAt, results: results.length });
@@ -8032,8 +8036,10 @@ if (!IS_SERVER) {
           allResults = results.find((r) => r && r.length > 0) || [];
         }
         mark("search_done", { queries: allQueries.length, results: allResults.length });
-        if (allResults.length === 0 && allQueries.length > 0) {
+        if (allResults.length === 0 && allQueries.length > 0 && Date.now() < searchDeadline) {
           for (const query of allQueries.slice(0, 3)) {
+            const remainingTimeout = searchDeadline - Date.now();
+            if (remainingTimeout <= 0) break;
             try {
               const wpUrl = `${baseUrl}/?s=${encodeURIComponent(query)}`;
               const wpHtml = yield smartFetch(wpUrl, baseUrl, {
@@ -8041,7 +8047,9 @@ if (!IS_SERVER) {
                   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                   "Referer": `${baseUrl}/`
                 },
-                provider: "guardoserie"
+                provider: "guardoserie",
+                skipBypassOnFailure: true,
+                timeout: remainingTimeout
               });
               const wpResults = extractSearchResultsFromHtml(wpHtml, baseUrl);
               if (wpResults.length > 0) {
