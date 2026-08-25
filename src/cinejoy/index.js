@@ -46,7 +46,6 @@ const REQUEST_HEADER = {
 let wasmExportsPromise = null;
 let serversCache = null;
 let serversCacheAt = 0;
-let nextCinejoyProxyRoute = false;
 const titleCache = new Map();
 let lastDiagnostics = { stage: 'idle', at: null };
 
@@ -68,47 +67,15 @@ function getDiagnostics() {
 }
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
-  const hasProviderProxy = String(process.env.PROVIDER_PROXY || '').trim().length > 0;
-  const firstRoute = hasProviderProxy ? nextCinejoyProxyRoute : false;
-  if (hasProviderProxy) nextCinejoyProxyRoute = !nextCinejoyProxyRoute;
-  const attempts = hasProviderProxy ? [firstRoute, !firstRoute] : [false];
-  let lastError = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  return (async () => {
-    for (const [attemptIndex, forceProviderProxy] of attempts.entries()) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const route = forceProviderProxy ? 'PROVIDER_PROXY' : 'direct';
-      const fallbackRoute = forceProviderProxy ? 'direct' : 'PROVIDER_PROXY';
-      try {
-        const requestOptions = {
-          ...options,
-          provider: 'cinejoy',
-          signal: controller.signal
-        };
-        if (forceProviderProxy) requestOptions.forceProviderProxy = true;
-
-        const response = await fetch(url, requestOptions);
-        if (attemptIndex === 0 && response.status === 403 && hasProviderProxy) {
-          console.warn(`[Cinejoy] ${url} ${route} returned HTTP 403; retrying via ${fallbackRoute}`);
-          try { await response.body?.cancel(); } catch { }
-          continue;
-        }
-        return response;
-      } catch (error) {
-        lastError = error;
-        if (attemptIndex === 0 && hasProviderProxy) {
-          console.warn(`[Cinejoy] ${url} ${route} request failed; retrying via ${fallbackRoute}`);
-          continue;
-        }
-        throw error;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-
-    throw lastError || new Error(`Cinejoy request failed: ${url}`);
-  })();
+  return fetch(url, {
+    ...options,
+    provider: 'cinejoy',
+    forceProviderProxy: true,
+    signal: controller.signal
+  }).finally(() => clearTimeout(timer));
 }
 
 async function getWasmExports() {

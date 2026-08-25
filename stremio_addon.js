@@ -107,11 +107,15 @@ const agentOptions = {
 
 const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
-const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
+const rawProviderProxy = String(process.env.PROVIDER_PROXY || '');
+const providerProxyUrls = rawProviderProxy
     .split(/[\s,;|]+/)
     // Coolify can preserve escaped separators from pasted proxy lists.
-    .map(value => value.trim().replace(/\\(?=[:/])/g, '').replace(/^['"]|['"]$/g, '').replace(/\/+$/, ''))
+    .map(value => value.trim().replace(/^['"]|['"]$/g, '').replace(/\\/g, '').replace(/\/+$/, ''))
     .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+if (rawProviderProxy.trim() && providerProxyUrls.length === 0) {
+    console.warn('[Fetch] PROVIDER_PROXY configured but no valid proxy URLs found');
+}
 const providerProxyDispatchers = new Map();
 const providerProxyAgents = new Map();
 let providerProxyLogged = false;
@@ -469,6 +473,9 @@ global.fetch = async function (url, options = {}) {
         const proxyUrl = forceProviderProxy
             ? getProviderProxyUrl()
             : (shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '');
+        if (forceProviderProxy && !proxyUrl) {
+            throw new Error('PROVIDER_PROXY has no valid proxy URL');
+        }
         const transport = usesNativeUndiciFetch
             ? (() => {
                 const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
