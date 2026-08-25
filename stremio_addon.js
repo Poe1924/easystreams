@@ -130,7 +130,8 @@ function getProviderProxyDispatcher(proxyUrl) {
     if (providerProxyDispatchers.has(proxyUrl)) return providerProxyDispatchers.get(proxyUrl);
 
     try {
-        const dispatcher = new UndiciProxyAgent(proxyUrl);
+        // Rotating gateways assign a fresh exit IP on a fresh connection.
+        const dispatcher = new UndiciProxyAgent({ uri: proxyUrl, pipelining: 0 });
         providerProxyDispatchers.set(proxyUrl, dispatcher);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
@@ -148,7 +149,7 @@ function getProviderProxyAgent(proxyUrl) {
     if (providerProxyAgents.has(proxyUrl)) return providerProxyAgents.get(proxyUrl);
 
     try {
-        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions });
+        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions, keepAlive: false });
         providerProxyAgents.set(proxyUrl, agent);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
