@@ -476,12 +476,22 @@ global.fetch = async function (url, options = {}) {
         if (forceProviderProxy && !proxyUrl) {
             throw new Error('PROVIDER_PROXY has no valid proxy URL');
         }
+        const proxyTransport = usesNativeUndiciFetch
+            ? getProviderProxyDispatcher(proxyUrl)
+            : getProviderProxyAgent(proxyUrl);
+        if (forceProviderProxy && !proxyTransport) {
+            throw new Error('PROVIDER_PROXY transport could not be initialized');
+        }
         const transport = usesNativeUndiciFetch
             ? (() => {
-                const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
+                const dispatcher = forceProviderProxy
+                    ? proxyTransport
+                    : (fetchOptions.dispatcher || proxyTransport || ipv4Dispatcher);
                 return dispatcher ? { dispatcher } : {};
             })()
-            : { agent: fetchOptions.agent || getProviderProxyAgent(proxyUrl) || (urlString.startsWith('https') ? httpsAgent : httpAgent) };
+            : { agent: forceProviderProxy
+                ? proxyTransport
+                : (fetchOptions.agent || proxyTransport || (urlString.startsWith('https') ? httpsAgent : httpAgent)) };
         const response = await originalFetch(url, {
             ...fetchOptions,
             ...transport,
