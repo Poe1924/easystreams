@@ -27,6 +27,7 @@ warp-cli --accept-tos mode warp
 # I provider che devono uscire dall'IP VPS, non dal tunnel WARP.
 WARP_BYPASS_HOSTS=(
     '*.cccdn.net'
+    'p.webshare.io'
     'api.themoviedb.org'
     'animemapping.realbestia.com'
     'info.movieboxnoob.cc'
