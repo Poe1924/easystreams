@@ -24,7 +24,7 @@ if (!IS_SERVER) {
     }
   };
 } else {
-const { webcrypto } = require('crypto');
+const { webcrypto, createHash } = require('crypto');
 
 const BASE_URL = 'https://cinejoy.to';
 const API_URL = 'https://api.shegu.st';
@@ -273,13 +273,24 @@ function normalizeQuality(height) {
   return '240p';
 }
 
-function inspectHlsMaster(text) {
+function resolvePlaylistUrl(value, baseUrl) {
+  try {
+    return new URL(String(value || '').trim(), baseUrl || undefined).toString();
+  } catch {
+    return String(value || '').trim();
+  }
+}
+
+function inspectHlsMaster(text, baseUrl = '') {
   const audioLanguages = [];
   const audioSeen = new Set();
   const qualities = [];
   const qualitySeen = new Set();
+  const variants = [];
+  let pendingVariant = null;
 
   for (const line of String(text || '').split(/\r?\n/)) {
+    const trimmedLine = line.trim();
     if (line.startsWith('#EXT-X-MEDIA:') && /TYPE=AUDIO/i.test(line)) {
       const attributes = parseHlsAttributes(line.slice('#EXT-X-MEDIA:'.length));
       const language = String(attributes.LANGUAGE || '').trim().toLowerCase();
@@ -296,21 +307,78 @@ function inspectHlsMaster(text) {
       const attributes = parseHlsAttributes(line.slice('#EXT-X-STREAM-INF:'.length));
       const height = String(attributes.RESOLUTION || '').match(/x(\d+)$/i)?.[1];
       const quality = normalizeQuality(height);
+      pendingVariant = { attributes, height: Number.parseInt(height || '', 10) || 0, quality };
       if (quality && !qualitySeen.has(quality)) {
         qualitySeen.add(quality);
         qualities.push(quality);
       }
+      continue;
+    }
+
+    if (pendingVariant && trimmedLine && !trimmedLine.startsWith('#')) {
+      variants.push({
+        ...pendingVariant,
+        url: resolvePlaylistUrl(trimmedLine, baseUrl)
+      });
+      pendingVariant = null;
     }
   }
 
   const qualityRank = { '4K': 0, '1440p': 1, '1080p': 2, '720p': 3, '480p': 4, '360p': 5, '240p': 6 };
   qualities.sort((a, b) => qualityRank[a] - qualityRank[b]);
+  const bestVariant = variants
+    .filter(variant => variant.quality || variant.height > 0)
+    .sort((a, b) => (qualityRank[a.quality] ?? 99) - (qualityRank[b.quality] ?? 99))[0];
 
   return {
     audioLanguages,
     qualities,
-    quality: qualities[0] || checkQualityFromText(text) || null
+    quality: qualities[0] || checkQualityFromText(text) || null,
+    videoUrl: bestVariant?.url || String(baseUrl || '').trim()
   };
+}
+
+function encodeBase64Url(value) {
+  return Buffer.from(JSON.stringify(value), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function buildVixsrcAudioUrl(mediaRequest) {
+  const tmdbId = String(mediaRequest?.payload?.tmdb || '').trim();
+  if (!tmdbId) return '';
+
+  if (mediaRequest?.path === 'movie') {
+    return `https://vixsrc.to/movie/${encodeURIComponent(tmdbId)}`;
+  }
+
+  const season = String(mediaRequest?.payload?.season || '').trim();
+  const episode = String(mediaRequest?.payload?.episode || '').trim();
+  if (!season || !episode) return '';
+  return `https://vixsrc.to/tv/${encodeURIComponent(tmdbId)}/${encodeURIComponent(season)}/${encodeURIComponent(episode)}`;
+}
+
+function buildDualFallbackUrl(providerContext, videoUrl, mediaRequest, cacheInfo = {}) {
+  const proxyUrl = String(providerContext?.proxyUrl || '').trim().replace(/\/+$/, '');
+  const audioUrl = buildVixsrcAudioUrl(mediaRequest);
+  if (!proxyUrl || !audioUrl || !videoUrl) return '';
+
+  const descriptorPayload = {
+    video: { url: videoUrl },
+    audio: { extractor: 'vixsrc', d: audioUrl },
+    audio_lang: 'ita',
+    resolution: Number(cacheInfo.resolution) || 2160
+  };
+  if (mediaRequest?.mediaKey) descriptorPayload.media_key = mediaRequest.mediaKey;
+  if (cacheInfo.mediaKey) descriptorPayload.media_key = cacheInfo.mediaKey;
+  if (cacheInfo.videoFingerprint) descriptorPayload.video_fingerprint = cacheInfo.videoFingerprint;
+  const descriptor = encodeBase64Url(descriptorPayload);
+  const params = new URLSearchParams({ d: descriptor });
+  const password = String(providerContext?.proxyPassword || '').trim();
+  if (password) params.set('api_password', password);
+  return `${proxyUrl}/dual/menifest.m3u8?${params.toString()}`;
 }
 
 async function inspectPlaylist(url, headers) {
@@ -326,7 +394,8 @@ async function inspectPlaylist(url, headers) {
         lastError = new Error(`Cinejoy playlist HTTP ${response.status}`);
         continue;
       }
-      return inspectHlsMaster(await response.text());
+      const finalUrl = String(response.url || url);
+      return inspectHlsMaster(await response.text(), finalUrl);
     } catch (error) {
       lastError = error;
     }
@@ -344,13 +413,40 @@ function getMediaRequest(type, tmdbId, season, episode) {
   };
 }
 
-async function getServerStreams(server, mediaRequest, title) {
+function buildDualMediaKey(rawId, mediaRequest, season, episode) {
+  const mediaType = mediaRequest?.path === 'movie' ? 'movie' : 'series';
+  const sourceId = String(rawId || '').split(':', 1)[0].trim();
+  const mediaSeason = mediaType === 'movie' ? 0 : Number(season) || 0;
+  const mediaEpisode = mediaType === 'movie' ? 0 : Number(episode) || 0;
+  return sourceId
+    ? `${mediaType}:${sourceId}:${mediaSeason}:${mediaEpisode}`
+    : '';
+}
+
+function buildDualVideoFingerprint(server, playlist) {
+  let path = String(playlist || '').trim();
+  try {
+    path = new URL(path).pathname;
+  } catch {
+    // Keep the raw value if the upstream URL is temporarily malformed.
+  }
+  const stable = `cinejoy|${String(server?.name || '').trim().toLowerCase()}|${path}`;
+  return createHash('sha1').update(stable).digest('hex').slice(0, 20);
+}
+
+async function getServerStreams(
+  server,
+  mediaRequest,
+  title,
+  providerContext = null,
+  { dualOnly = false } = {}
+) {
   const data = await encryptedRequest(`/${server.name}/${mediaRequest.path}`, mediaRequest.payload);
   const entries = Array.isArray(data?.stream) ? data.stream : [];
   setDiagnostics('stream_response', { server: server.name, entries: entries.length });
   const headers = { Referer: `${BASE_URL}/`, 'User-Agent': USER_AGENT };
 
-  return Promise.all(entries.map(async entry => {
+  const inspectedEntries = (await Promise.all(entries.map(async entry => {
     const playlist = String(entry?.playlist || '').trim();
     if (!/^https?:\/\/[^\s]+\.m3u8(?:[?#].*)?$/i.test(playlist)) {
       setDiagnostics('invalid_playlist', { server: server.name });
@@ -368,6 +464,7 @@ async function getServerStreams(server, mediaRequest, title) {
     const quality = playlistInfo?.quality || (server['4k'] === true ? '4K' : 'Unknown');
     const audioLanguages = playlistInfo?.audioLanguages || [];
     const availableQualities = playlistInfo?.qualities || [];
+    const selectedVideoUrl = playlistInfo?.videoUrl || playlist;
     const hasItalianAudio = audioLanguages.some(language => /\bitalian\b/i.test(language));
     setDiagnostics('playlist_checked', {
       server: server.name,
@@ -381,25 +478,85 @@ async function getServerStreams(server, mediaRequest, title) {
         qualities: availableQualities,
         audioTracks: audioLanguages.length
       });
-      return null;
+      return {
+        playlist,
+        selectedVideoUrl,
+        quality,
+        audioLanguages,
+        availableQualities,
+        hasItalianAudio: false
+      };
     }
 
-    const streamLanguage = 'Italian';
-    const normalizedQuality = quality === '4K' ? '2160p' : quality;
-
-    return formatStream({
-      name: 'Cinejoy',
-      title,
-      url: playlist,
-      quality: normalizedQuality,
-      language: streamLanguage,
+    return {
+      playlist,
+      selectedVideoUrl,
+      quality,
       audioLanguages,
       availableQualities,
+      hasItalianAudio: true
+    };
+  }))).filter(Boolean);
+
+  const directStreams = dualOnly ? [] : inspectedEntries
+    .filter(entry => entry.hasItalianAudio)
+    .map(entry => {
+      const normalizedQuality = entry.quality === '4K' ? '2160p' : entry.quality;
+      return formatStream({
+        name: 'Cinejoy',
+        title,
+        url: entry.playlist,
+        quality: normalizedQuality,
+        language: 'Italian',
+        audioLanguages: entry.audioLanguages,
+        availableQualities: entry.availableQualities,
+        type: 'hls',
+        // Cinejoy accepts direct HLS requests. Do not expose headers here:
+        // Stremio's local HLS proxy corrupts the child playlist URLs.
+      }, 'Cinejoy');
+    })
+    .filter(Boolean);
+
+  const hasDirect4KItalian = inspectedEntries.some(entry =>
+    entry.hasItalianAudio && entry.quality === '4K'
+  );
+  if (!dualOnly && hasDirect4KItalian) return directStreams;
+
+  const fourKPlaylist = inspectedEntries.find(entry => entry.quality === '4K');
+  const dualCache = fourKPlaylist
+    ? {
+        mediaKey: mediaRequest.mediaKey || '',
+        resolution: 2160,
+        videoFingerprint: buildDualVideoFingerprint(server, fourKPlaylist.playlist)
+      }
+    : null;
+  const dualUrl = buildDualFallbackUrl(
+    providerContext,
+    fourKPlaylist?.playlist,
+    mediaRequest,
+    dualCache || {}
+  );
+  if (dualUrl) {
+    setDiagnostics('dual_4k_fallback', {
+      server: server.name,
+      audio: 'vixsrc/ita'
+    });
+    directStreams.push(formatStream({
+      name: 'Cinejoy DUAL',
+      title,
+      url: dualUrl,
+      quality: '2160p',
+      language: 'Italian',
+      audioLanguages: ['Italian'],
+      availableQualities: ['4K'],
       type: 'hls',
-      // Cinejoy accepts direct HLS requests. Do not expose headers here:
-      // Stremio's local HLS proxy corrupts the child playlist URLs.
-    }, 'Cinejoy');
-  })).then(streams => streams.filter(Boolean));
+      cinejoyDualFallback: true,
+      dualCache,
+      behaviorHints: { notWebReady: false }
+    }, 'Cinejoy'));
+  }
+
+  return directStreams.filter(Boolean);
 }
 
 async function getStreams(id, type, season, episode, providerContext = null) {
@@ -417,6 +574,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   const effectiveSeason = Number.parseInt(String(season || ''), 10) || 1;
   const effectiveEpisode = Number.parseInt(String(episode || ''), 10) || 1;
   const mediaRequest = getMediaRequest(isMovie ? 'movie' : 'series', tmdbId, effectiveSeason, effectiveEpisode);
+  mediaRequest.mediaKey = buildDualMediaKey(id, mediaRequest, effectiveSeason, effectiveEpisode);
   const mediaTitle = await resolveMediaTitle(tmdbId, isMovie ? 'movie' : 'tv', providerContext);
   const baseTitle = mediaTitle || (isMovie ? 'Film' : 'Serie TV');
   const title = isMovie ? baseTitle : `${baseTitle} ${effectiveSeason}x${effectiveEpisode}`;
@@ -441,15 +599,50 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   }
   setDiagnostics('primary_server', { server: primaryServer.name });
 
+  let streams = [];
+  let primaryServerFailed = false;
   try {
-    const streams = await getServerStreams(primaryServer, mediaRequest, title);
-    if (streams.length > 0) setDiagnostics('ok', { streams: streams.length });
-    return streams;
+    streams = await getServerStreams(primaryServer, mediaRequest, title, providerContext);
   } catch (error) {
+    primaryServerFailed = true;
     console.warn(`[Cinejoy] ${primaryServer.name} extraction failed: ${error.message}`);
     setDiagnostics('extraction_failed', { server: primaryServer.name, error: error.message });
-    return [];
   }
+
+  const hasDirect4KItalian = streams.some(stream =>
+    !stream?.cinejoyDualFallback && String(stream?.quality || '').toLowerCase() === '2160p'
+  );
+  const hasDualFallback = streams.some(stream => stream?.cinejoyDualFallback === true);
+
+  if (!hasDirect4KItalian && !hasDualFallback && providerContext?.proxyUrl) {
+    for (const server of servers) {
+      if (!primaryServerFailed && server === primaryServer) continue;
+      try {
+        const fallbackStreams = await getServerStreams(
+          server,
+          mediaRequest,
+          title,
+          providerContext,
+          { dualOnly: true }
+        );
+        const dualFallback = fallbackStreams.find(stream => stream?.cinejoyDualFallback === true);
+        if (dualFallback) {
+          streams.push(dualFallback);
+          setDiagnostics('dual_4k_fallback_server', { server: server.name });
+          break;
+        }
+      } catch (error) {
+        console.warn(`[Cinejoy] ${server.name} DUAL fallback skipped: ${error.message}`);
+        setDiagnostics('dual_fallback_server_failed', {
+          server: server.name,
+          error: error.message
+        });
+      }
+    }
+  }
+
+  if (streams.length > 0) setDiagnostics('ok', { streams: streams.length });
+  return streams;
 }
 
 module.exports = { getStreams, getDiagnostics };
