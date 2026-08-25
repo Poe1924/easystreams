@@ -107,14 +107,18 @@ const agentOptions = {
 
 const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
-const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
+const rawProviderProxy = String(process.env.PROVIDER_PROXY || '');
+const providerProxyUrls = rawProviderProxy
     .split(/[\s,;|]+/)
-    .map(value => value.trim().replace(/\/+$/, ''))
+    // Coolify can preserve escaped separators from pasted proxy lists.
+    .map(value => value.trim().replace(/^['"]|['"]$/g, '').replace(/\\/g, '').replace(/\/+$/, ''))
     .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+if (rawProviderProxy.trim() && providerProxyUrls.length === 0) {
+    console.warn('[Fetch] PROVIDER_PROXY configured but no valid proxy URLs found');
+}
 const providerProxyDispatchers = new Map();
 const providerProxyAgents = new Map();
 let providerProxyLogged = false;
-const PROVIDER_PROXY_NAMES = new Set(['animeunity', 'cinejoy', 'loadm']);
 
 function getProviderProxyUrl() {
     if (providerProxyUrls.length === 0) return '';
@@ -126,7 +130,8 @@ function getProviderProxyDispatcher(proxyUrl) {
     if (providerProxyDispatchers.has(proxyUrl)) return providerProxyDispatchers.get(proxyUrl);
 
     try {
-        const dispatcher = new UndiciProxyAgent(proxyUrl);
+        // Rotating gateways assign a fresh exit IP on a fresh connection.
+        const dispatcher = new UndiciProxyAgent({ uri: proxyUrl, pipelining: 0 });
         providerProxyDispatchers.set(proxyUrl, dispatcher);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
@@ -144,7 +149,7 @@ function getProviderProxyAgent(proxyUrl) {
     if (providerProxyAgents.has(proxyUrl)) return providerProxyAgents.get(proxyUrl);
 
     try {
-        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions });
+        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions, keepAlive: false });
         providerProxyAgents.set(proxyUrl, agent);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
@@ -157,16 +162,25 @@ function getProviderProxyAgent(proxyUrl) {
     }
 }
 
-function shouldUseProviderProxy(urlString, provider) {
-    const providerName = String(provider || '').trim().toLowerCase();
-    if (PROVIDER_PROXY_NAMES.has(providerName)) return true;
-
+function shouldUseProviderProxy(urlString) {
     try {
         const hostname = new URL(urlString).hostname.toLowerCase();
+
+        // Keep stable control-plane APIs on the container's normal IPv4/WARP
+        // route. A provider proxy can be unavailable even when these APIs are
+        // healthy, and routing them through it turns valid responses into
+        // misleading "Request was cancelled" fetch failures.
+        if (
+            hostname === 'api.shegu.st' ||
+            hostname === 'api.themoviedb.org' ||
+            hostname === 'animemapping.realbestia.com'
+        ) {
+            return false;
+        }
+
         return hostname.includes('animeunity') ||
             hostname === 'cinejoy.to' || hostname.endsWith('.cinejoy.to') ||
-            /(^|\.)loadm(?:\.|$)/i.test(hostname) ||
-            hostname === 'api.shegu.st';
+            /(^|\.)loadm(?:\.|$)/i.test(hostname);
     } catch {
         return false;
     }
@@ -443,7 +457,7 @@ const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
     : null;
 
 global.fetch = async function (url, options = {}) {
-    const { timeout, provider, ...fetchOptions } = options;
+    const { timeout, provider, forceProviderProxy, ...fetchOptions } = options;
     const controller = options.signal ? null : new AbortController();
     const timeoutId = controller
         ? setTimeout(() => controller.abort(), timeout || FETCH_TIMEOUT)
@@ -457,13 +471,28 @@ global.fetch = async function (url, options = {}) {
                 : typeof url?.url === 'string'
                     ? url.url
                     : String(url);
-        const proxyUrl = shouldUseProviderProxy(urlString, provider) ? getProviderProxyUrl() : '';
+        const proxyUrl = forceProviderProxy
+            ? getProviderProxyUrl()
+            : (shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '');
+        if (forceProviderProxy && !proxyUrl) {
+            throw new Error('PROVIDER_PROXY has no valid proxy URL');
+        }
+        const proxyTransport = usesNativeUndiciFetch
+            ? getProviderProxyDispatcher(proxyUrl)
+            : getProviderProxyAgent(proxyUrl);
+        if (forceProviderProxy && !proxyTransport) {
+            throw new Error('PROVIDER_PROXY transport could not be initialized');
+        }
         const transport = usesNativeUndiciFetch
             ? (() => {
-                const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
+                const dispatcher = forceProviderProxy
+                    ? proxyTransport
+                    : (fetchOptions.dispatcher || proxyTransport || ipv4Dispatcher);
                 return dispatcher ? { dispatcher } : {};
             })()
-            : { agent: fetchOptions.agent || getProviderProxyAgent(proxyUrl) || (urlString.startsWith('https') ? httpsAgent : httpAgent) };
+            : { agent: forceProviderProxy
+                ? proxyTransport
+                : (fetchOptions.agent || proxyTransport || (urlString.startsWith('https') ? httpsAgent : httpAgent)) };
         const response = await originalFetch(url, {
             ...fetchOptions,
             ...transport,
@@ -701,6 +730,46 @@ function buildEasyProxyExtractorUrl(easyProxyUrl, easyProxyPassword, host, strea
     if (!proxyBaseUrl || !normalizedHost || !normalizedStreamUrl) return normalizedStreamUrl;
     const passwordQuery = proxyPassword ? `&api_password=${encodeURIComponent(proxyPassword)}` : '';
     return `${proxyBaseUrl}/extractor/video.${extension}?host=${encodeURIComponent(normalizedHost)}&d=${encodeURIComponent(normalizedStreamUrl)}&redirect_stream=true${passwordQuery}`;
+}
+
+const DUAL_CACHE_MISS_DESCRIPTION = 'Lento a partire o non funzionante';
+const DUAL_CACHE_STATUS_TIMEOUT_MS = 2500;
+
+async function isEasyProxyDualOffsetCached(easyProxyUrl, easyProxyPassword, cacheInfo) {
+    const proxyBaseUrl = normalizeEasyProxyUrl(easyProxyUrl);
+    if (!proxyBaseUrl || !cacheInfo?.mediaKey || !cacheInfo?.videoFingerprint) return false;
+
+    const params = new URLSearchParams();
+    const password = String(easyProxyPassword || '').trim();
+    if (password) params.set('api_password', password);
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller
+        ? setTimeout(() => controller.abort(), DUAL_CACHE_STATUS_TIMEOUT_MS)
+        : null;
+    try {
+        const response = await fetch(`${proxyBaseUrl}/dual/cache/status${params.toString() ? `?${params}` : ''}`, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                mediaKey: cacheInfo.mediaKey,
+                resolution: Number(cacheInfo.resolution) || 2160,
+                videoFingerprint: cacheInfo.videoFingerprint
+            }),
+            signal: controller?.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        return payload?.offset?.cached === true;
+    } catch (error) {
+        logVerbose(`[EasyProxy] DUAL cache status unavailable: ${error.message}`);
+        return false;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
 }
 
 function isMixdropStreamUrl(streamUrl) {
@@ -2292,7 +2361,20 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
                     .map(async (s) => {
                         let finalStreamUrl = s.url;
                         let proxiedByEasyProxy = false;
-                        if (name === 'streamingcommunity') {
+                        let streamDescription = s.description || '';
+                        if (name === 'cinejoy' && s.cinejoyDualFallback) {
+                            // Cinejoy DUAL fallback already points to EasyProxy.
+                            proxiedByEasyProxy = true;
+                            const cached = hasEasyProxy && await isEasyProxyDualOffsetCached(
+                                easyProxyUrl,
+                                easyProxyPassword,
+                                s.dualCache
+                            );
+                            if (!cached) {
+                                streamDescription = DUAL_CACHE_MISS_DESCRIPTION;
+                                logVerbose(`[Cinejoy] DUAL offset cache miss: ${s.dualCache?.mediaKey || 'unknown key'}`);
+                            }
+                        } else if (name === 'streamingcommunity') {
                             if (hasEasyProxy) {
                                 finalStreamUrl = await buildEasyProxyUrlWithFailover(
                                     easyProxyEntries,
@@ -2423,12 +2505,14 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
                             if (fillerTag) {
                                 lines.push(fillerTag);
                             }
-                            if (s.description) {
-                                const sizeMatch = String(s.description).match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB))/i);
+                            if (streamDescription) {
+                                const sizeMatch = String(streamDescription).match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB))/i);
                                 if (sizeMatch) {
                                     lines.push(`💾 ${sizeMatch[1]}`);
+                                } else if (streamDescription === DUAL_CACHE_MISS_DESCRIPTION) {
+                                    lines.push(`⚠️ ${streamDescription}`);
                                 } else {
-                                    lines.push(`💾 ${s.description}`);
+                                    lines.push(`💾 ${streamDescription}`);
                                 }
                             }
                             
@@ -2471,11 +2555,15 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
                                 titleUI += `\n${fillerTag}`;
                             }
                             titleUI += `\n${s.providerName || s.name || 'EasyStreams'}`;
-                            if (s.description) titleUI += ` | ${s.description}`;
                             if (s.language) {
                                 titleUI += `\n🗣️ ${s.language}  🔍EasyStreams`;
                             } else {
                                 titleUI += `\n🔍EasyStreams`;
+                            }
+                            if (streamDescription === DUAL_CACHE_MISS_DESCRIPTION) {
+                                titleUI += `\n⚠️ ${streamDescription}`;
+                            } else if (streamDescription) {
+                                titleUI += ` | ${streamDescription}`;
                             }
                         }
 
@@ -2522,7 +2610,7 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
 
                         return {
                             name: nameUI,
-                            title: titleUI,
+                            description: titleUI,
                             url: finalStreamUrl,
                             behaviorHints: finalBehaviorHints,
                             headers: proxiedByEasyProxy ? undefined : (s.headers || s.behaviorHints?.headers || s.behaviorHints?.proxyHeaders?.request),
