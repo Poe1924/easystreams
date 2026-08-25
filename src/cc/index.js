@@ -496,6 +496,13 @@ function parseCompositeSeriesId(rawId, season, episode) {
     return parsed;
 }
 
+function getQualityFromText(value) {
+    const text = String(value || '');
+    if (/\b(?:4k|2160p)\b/i.test(text)) return '2160p';
+    const match = text.match(/\b(1440|1080|720|576|480|360|240)p\b/i);
+    return match ? `${match[1]}p` : null;
+}
+
 function buildDownloadUrl(fileVal, movieTitle) {
     const baseEnd = fileVal.indexOf('/public_files/');
     if (baseEnd === -1) return null;
@@ -510,7 +517,7 @@ function buildDownloadUrl(fileVal, movieTitle) {
 
     const m3u8Entry = parts.find(p => p.includes('.m3u8'));
     const url = cdnBase + rest + (m3u8Entry ? '' : '.urlset/master.m3u8');
-    return { url, hasItalian: !!itaAudio };
+    return { url, hasItalian: !!itaAudio, quality: getQualityFromText(video) };
 }
 
 function extractStreamFromAtob(html, movieTitle, season, episode) {
@@ -587,25 +594,6 @@ async function checkStreamUrl(url) {
     } catch (e) {
         // A slow/unreachable pre-check must not hide an otherwise playable stream.
         return true;
-    }
-}
-
-async function checkItalianAudioInPlaylist(url) {
-    if (!/\.m3u8(?:[?#].*)?$/i.test(String(url || ''))) return false;
-
-    try {
-        const response = await fetchWithTimeout(url, {
-            timeout: FETCH_TIMEOUT,
-            headers: {
-                Referer: `${BASE_URL}/`,
-                'User-Agent': USER_AGENT
-            }
-        });
-        if (!response.ok) return false;
-        const text = await response.text();
-        return /#EXT-X-MEDIA:[^\r\n]*(?:LANGUAGE\s*=\s*"?(?:it|ita)"?|NAME\s*=\s*"?(?:Italian|Italiano)"?)/i.test(text);
-    } catch {
-        return false;
     }
 }
 
@@ -727,12 +715,13 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             const useEpisode = providerType === 'tv' ? episode : null;
             const atobResult = extractStreamFromAtob(html, movieTitle, useSeason, useEpisode);
             if (atobResult) {
-                links.push({ url: atobResult.url, text: '' });
+                links.push({ url: atobResult.url, text: '', quality: atobResult.quality });
                 hasItalian = atobResult.hasItalian;
             }
         }
 
         let selectedUrl = null;
+        let selectedQuality = null;
         if (links.length === 0) {
             console.log(`[CinemaCity] No streams available`);
             return [];
@@ -741,6 +730,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             const text = link.text;
             if (text.includes('ita') || text.includes('italian') || text.includes('italiano')) {
                 selectedUrl = link.url;
+                selectedQuality = link.quality || getQualityFromText(`${link.text} ${link.url}`);
                 hasItalian = true;
                 break;
             }
@@ -749,10 +739,14 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             for (const link of links) {
                 if (link.text.includes('eng') || link.text.includes('sub')) continue;
                 selectedUrl = link.url;
+                selectedQuality = link.quality || getQualityFromText(`${link.text} ${link.url}`);
                 break;
             }
         }
-        if (!selectedUrl) selectedUrl = links[0].url;
+        if (!selectedUrl) {
+            selectedUrl = links[0].url;
+            selectedQuality = links[0].quality || getQualityFromText(`${links[0].text} ${links[0].url}`);
+        }
 
         const streamUrl = resolveUrl(movieUrl, selectedUrl);
         if (!await checkStreamUrl(streamUrl)) {
@@ -760,9 +754,6 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             return [];
         }
 
-        if (/\.m3u8(?:[?#].*)?$/i.test(streamUrl)) {
-            hasItalian = await checkItalianAudioInPlaylist(streamUrl);
-        }
         if (!hasItalian) {
             console.log(`[CinemaCity] Stream scartato: audio italiano non trovato`);
             return [];
@@ -774,7 +765,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             name: "CinemaCity",
             title: title,
             url: streamUrl,
-            quality: "1080p",
+            quality: selectedQuality || "Unknown",
             type: "hls",
             language: hasItalian ? 'Italian' : '',
             behaviorHints: { notWebReady: true },
