@@ -109,7 +109,8 @@ const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
 const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
     .split(/[\s,;|]+/)
-    .map(value => value.trim().replace(/\/+$/, ''))
+    // Coolify can preserve escaped separators from pasted proxy lists.
+    .map(value => value.trim().replace(/\\(?=[:/])/g, '').replace(/^['"]|['"]$/g, '').replace(/\/+$/, ''))
     .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
 const providerProxyDispatchers = new Map();
 const providerProxyAgents = new Map();
