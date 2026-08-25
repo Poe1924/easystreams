@@ -114,7 +114,6 @@ const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
 const providerProxyDispatchers = new Map();
 const providerProxyAgents = new Map();
 let providerProxyLogged = false;
-const PROVIDER_PROXY_NAMES = new Set(['animeunity', 'cinejoy', 'loadm']);
 
 function getProviderProxyUrl() {
     if (providerProxyUrls.length === 0) return '';
@@ -157,16 +156,25 @@ function getProviderProxyAgent(proxyUrl) {
     }
 }
 
-function shouldUseProviderProxy(urlString, provider) {
-    const providerName = String(provider || '').trim().toLowerCase();
-    if (PROVIDER_PROXY_NAMES.has(providerName)) return true;
-
+function shouldUseProviderProxy(urlString) {
     try {
         const hostname = new URL(urlString).hostname.toLowerCase();
+
+        // Keep stable control-plane APIs on the container's normal IPv4/WARP
+        // route. A provider proxy can be unavailable even when these APIs are
+        // healthy, and routing them through it turns valid responses into
+        // misleading "Request was cancelled" fetch failures.
+        if (
+            hostname === 'api.shegu.st' ||
+            hostname === 'api.themoviedb.org' ||
+            hostname === 'animemapping.realbestia.com'
+        ) {
+            return false;
+        }
+
         return hostname.includes('animeunity') ||
             hostname === 'cinejoy.to' || hostname.endsWith('.cinejoy.to') ||
-            /(^|\.)loadm(?:\.|$)/i.test(hostname) ||
-            hostname === 'api.shegu.st';
+            /(^|\.)loadm(?:\.|$)/i.test(hostname);
     } catch {
         return false;
     }
@@ -457,7 +465,7 @@ global.fetch = async function (url, options = {}) {
                 : typeof url?.url === 'string'
                     ? url.url
                     : String(url);
-        const proxyUrl = shouldUseProviderProxy(urlString, provider) ? getProviderProxyUrl() : '';
+        const proxyUrl = shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '';
         const transport = usesNativeUndiciFetch
             ? (() => {
                 const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
