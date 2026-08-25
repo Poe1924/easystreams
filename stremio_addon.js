@@ -451,7 +451,7 @@ const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
     : null;
 
 global.fetch = async function (url, options = {}) {
-    const { timeout, provider, ...fetchOptions } = options;
+    const { timeout, provider, forceProviderProxy, ...fetchOptions } = options;
     const controller = options.signal ? null : new AbortController();
     const timeoutId = controller
         ? setTimeout(() => controller.abort(), timeout || FETCH_TIMEOUT)
@@ -465,7 +465,9 @@ global.fetch = async function (url, options = {}) {
                 : typeof url?.url === 'string'
                     ? url.url
                     : String(url);
-        const proxyUrl = shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '';
+        const proxyUrl = forceProviderProxy
+            ? getProviderProxyUrl()
+            : (shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '');
         const transport = usesNativeUndiciFetch
             ? (() => {
                 const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
