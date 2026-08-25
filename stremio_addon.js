@@ -703,6 +703,46 @@ function buildEasyProxyExtractorUrl(easyProxyUrl, easyProxyPassword, host, strea
     return `${proxyBaseUrl}/extractor/video.${extension}?host=${encodeURIComponent(normalizedHost)}&d=${encodeURIComponent(normalizedStreamUrl)}&redirect_stream=true${passwordQuery}`;
 }
 
+const DUAL_CACHE_MISS_DESCRIPTION = 'Lento a partire o non funzionante';
+const DUAL_CACHE_STATUS_TIMEOUT_MS = 2500;
+
+async function isEasyProxyDualOffsetCached(easyProxyUrl, easyProxyPassword, cacheInfo) {
+    const proxyBaseUrl = normalizeEasyProxyUrl(easyProxyUrl);
+    if (!proxyBaseUrl || !cacheInfo?.mediaKey || !cacheInfo?.videoFingerprint) return false;
+
+    const params = new URLSearchParams();
+    const password = String(easyProxyPassword || '').trim();
+    if (password) params.set('api_password', password);
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller
+        ? setTimeout(() => controller.abort(), DUAL_CACHE_STATUS_TIMEOUT_MS)
+        : null;
+    try {
+        const response = await fetch(`${proxyBaseUrl}/dual/cache/status${params.toString() ? `?${params}` : ''}`, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                mediaKey: cacheInfo.mediaKey,
+                resolution: Number(cacheInfo.resolution) || 2160,
+                videoFingerprint: cacheInfo.videoFingerprint
+            }),
+            signal: controller?.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        return payload?.offset?.cached === true;
+    } catch (error) {
+        logVerbose(`[EasyProxy] DUAL cache status unavailable: ${error.message}`);
+        return false;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+}
+
 function isMixdropStreamUrl(streamUrl) {
     const lower = String(streamUrl || '').toLowerCase();
     return lower.includes('mixdrop') || lower.includes('m1xdrop') || lower.includes('mxcontent');
@@ -2292,7 +2332,20 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
                     .map(async (s) => {
                         let finalStreamUrl = s.url;
                         let proxiedByEasyProxy = false;
-                        if (name === 'streamingcommunity') {
+                        let streamDescription = s.description || '';
+                        if (name === 'cinejoy' && s.cinejoyDualFallback) {
+                            // Cinejoy DUAL fallback already points to EasyProxy.
+                            proxiedByEasyProxy = true;
+                            const cached = hasEasyProxy && await isEasyProxyDualOffsetCached(
+                                easyProxyUrl,
+                                easyProxyPassword,
+                                s.dualCache
+                            );
+                            if (!cached) {
+                                streamDescription = DUAL_CACHE_MISS_DESCRIPTION;
+                                logVerbose(`[Cinejoy] DUAL offset cache miss: ${s.dualCache?.mediaKey || 'unknown key'}`);
+                            }
+                        } else if (name === 'streamingcommunity') {
                             if (hasEasyProxy) {
                                 finalStreamUrl = await buildEasyProxyUrlWithFailover(
                                     easyProxyEntries,
@@ -2423,12 +2476,14 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
                             if (fillerTag) {
                                 lines.push(fillerTag);
                             }
-                            if (s.description) {
-                                const sizeMatch = String(s.description).match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB))/i);
+                            if (streamDescription) {
+                                const sizeMatch = String(streamDescription).match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB))/i);
                                 if (sizeMatch) {
                                     lines.push(`💾 ${sizeMatch[1]}`);
+                                } else if (streamDescription === DUAL_CACHE_MISS_DESCRIPTION) {
+                                    lines.push(`⚠️ ${streamDescription}`);
                                 } else {
-                                    lines.push(`💾 ${s.description}`);
+                                    lines.push(`💾 ${streamDescription}`);
                                 }
                             }
                             
@@ -2471,11 +2526,15 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
                                 titleUI += `\n${fillerTag}`;
                             }
                             titleUI += `\n${s.providerName || s.name || 'EasyStreams'}`;
-                            if (s.description) titleUI += ` | ${s.description}`;
                             if (s.language) {
                                 titleUI += `\n🗣️ ${s.language}  🔍EasyStreams`;
                             } else {
                                 titleUI += `\n🔍EasyStreams`;
+                            }
+                            if (streamDescription === DUAL_CACHE_MISS_DESCRIPTION) {
+                                titleUI += `\n⚠️ ${streamDescription}`;
+                            } else if (streamDescription) {
+                                titleUI += ` | ${streamDescription}`;
                             }
                         }
 
@@ -2522,7 +2581,7 @@ builder.defineStreamHandler(async ({ type, id, config = {} }) => {
 
                         return {
                             name: nameUI,
-                            title: titleUI,
+                            description: titleUI,
                             url: finalStreamUrl,
                             behaviorHints: finalBehaviorHints,
                             headers: proxiedByEasyProxy ? undefined : (s.headers || s.behaviorHints?.headers || s.behaviorHints?.proxyHeaders?.request),
