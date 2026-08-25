@@ -107,10 +107,15 @@ const agentOptions = {
 
 const httpsAgent = new https.Agent(agentOptions);
 const httpAgent = new http.Agent(agentOptions);
-const providerProxyUrls = String(process.env.PROVIDER_PROXY || '')
+const rawProviderProxy = String(process.env.PROVIDER_PROXY || '');
+const providerProxyUrls = rawProviderProxy
     .split(/[\s,;|]+/)
-    .map(value => value.trim().replace(/\/+$/, ''))
+    // Coolify can preserve escaped separators from pasted proxy lists.
+    .map(value => value.trim().replace(/^['"]|['"]$/g, '').replace(/\\/g, '').replace(/\/+$/, ''))
     .filter(value => /^https?:\/\//i.test(value) || /^socks5h?:\/\//i.test(value));
+if (rawProviderProxy.trim() && providerProxyUrls.length === 0) {
+    console.warn('[Fetch] PROVIDER_PROXY configured but no valid proxy URLs found');
+}
 const providerProxyDispatchers = new Map();
 const providerProxyAgents = new Map();
 let providerProxyLogged = false;
@@ -125,7 +130,8 @@ function getProviderProxyDispatcher(proxyUrl) {
     if (providerProxyDispatchers.has(proxyUrl)) return providerProxyDispatchers.get(proxyUrl);
 
     try {
-        const dispatcher = new UndiciProxyAgent(proxyUrl);
+        // Rotating gateways assign a fresh exit IP on a fresh connection.
+        const dispatcher = new UndiciProxyAgent({ uri: proxyUrl, pipelining: 0 });
         providerProxyDispatchers.set(proxyUrl, dispatcher);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
@@ -143,7 +149,7 @@ function getProviderProxyAgent(proxyUrl) {
     if (providerProxyAgents.has(proxyUrl)) return providerProxyAgents.get(proxyUrl);
 
     try {
-        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions });
+        const agent = new HttpsProxyAgent(proxyUrl, { ...agentOptions, keepAlive: false });
         providerProxyAgents.set(proxyUrl, agent);
         if (!providerProxyLogged) {
             providerProxyLogged = true;
@@ -451,7 +457,7 @@ const ipv4Dispatcher = usesNativeUndiciFetch && UndiciAgent
     : null;
 
 global.fetch = async function (url, options = {}) {
-    const { timeout, provider, ...fetchOptions } = options;
+    const { timeout, provider, forceProviderProxy, ...fetchOptions } = options;
     const controller = options.signal ? null : new AbortController();
     const timeoutId = controller
         ? setTimeout(() => controller.abort(), timeout || FETCH_TIMEOUT)
@@ -465,13 +471,28 @@ global.fetch = async function (url, options = {}) {
                 : typeof url?.url === 'string'
                     ? url.url
                     : String(url);
-        const proxyUrl = shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '';
+        const proxyUrl = forceProviderProxy
+            ? getProviderProxyUrl()
+            : (shouldUseProviderProxy(urlString) ? getProviderProxyUrl() : '');
+        if (forceProviderProxy && !proxyUrl) {
+            throw new Error('PROVIDER_PROXY has no valid proxy URL');
+        }
+        const proxyTransport = usesNativeUndiciFetch
+            ? getProviderProxyDispatcher(proxyUrl)
+            : getProviderProxyAgent(proxyUrl);
+        if (forceProviderProxy && !proxyTransport) {
+            throw new Error('PROVIDER_PROXY transport could not be initialized');
+        }
         const transport = usesNativeUndiciFetch
             ? (() => {
-                const dispatcher = fetchOptions.dispatcher || getProviderProxyDispatcher(proxyUrl) || ipv4Dispatcher;
+                const dispatcher = forceProviderProxy
+                    ? proxyTransport
+                    : (fetchOptions.dispatcher || proxyTransport || ipv4Dispatcher);
                 return dispatcher ? { dispatcher } : {};
             })()
-            : { agent: fetchOptions.agent || getProviderProxyAgent(proxyUrl) || (urlString.startsWith('https') ? httpsAgent : httpAgent) };
+            : { agent: forceProviderProxy
+                ? proxyTransport
+                : (fetchOptions.agent || proxyTransport || (urlString.startsWith('https') ? httpsAgent : httpAgent)) };
         const response = await originalFetch(url, {
             ...fetchOptions,
             ...transport,

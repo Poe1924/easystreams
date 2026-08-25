@@ -14052,7 +14052,11 @@ var require_cinejoy = __commonJS({
       }, fetchWithTimeout2 = function(url, options = {}, timeoutMs = 5e3) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
-        return fetch(url, __spreadProps(__spreadValues({}, options), { provider: "cinejoy", signal: controller.signal })).finally(() => clearTimeout(timer));
+        return fetch(url, __spreadProps(__spreadValues({}, options), {
+          provider: "cinejoy",
+          forceProviderProxy: true,
+          signal: controller.signal
+        })).finally(() => clearTimeout(timer));
       }, resolveTmdbId2 = function(id, providerContext = null) {
         const contextId = String((providerContext == null ? void 0 : providerContext.tmdbId) || "").trim();
         if (/^\d+$/.test(contextId)) return contextId;

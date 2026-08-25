@@ -70,7 +70,12 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  return fetch(url, { ...options, provider: 'cinejoy', signal: controller.signal }).finally(() => clearTimeout(timer));
+  return fetch(url, {
+    ...options,
+    provider: 'cinejoy',
+    forceProviderProxy: true,
+    signal: controller.signal
+  }).finally(() => clearTimeout(timer));
 }
 
 async function getWasmExports() {
