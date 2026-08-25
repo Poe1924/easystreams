@@ -13753,8 +13753,8 @@ var require_cc = __commonJS({
     }
     function getQualityFromText(value) {
       const text = String(value || "");
-      if (/\b(?:4k|2160p)\b/i.test(text)) return "2160p";
-      const match = text.match(/\b(1440|1080|720|576|480|360|240)p\b/i);
+      if (/(?:^|[^0-9])(?:4k|2160p)(?![0-9])/i.test(text)) return "2160p";
+      const match = text.match(/(?:^|[^0-9])(1440|1080|720|576|480|360|240)p(?![0-9])/i);
       return match ? `${match[1]}p` : null;
     }
     function buildDownloadUrl(fileVal, movieTitle) {
@@ -14044,7 +14044,6 @@ var require_cinejoy = __commonJS({
         const timer = setTimeout(() => controller.abort(), timeoutMs);
         return fetch(url, __spreadProps(__spreadValues({}, options), {
           provider: "cinejoy",
-          forceProviderProxy: true,
           signal: controller.signal
         })).finally(() => clearTimeout(timer));
       }, resolveTmdbId2 = function(id, providerContext = null) {

@@ -713,8 +713,8 @@ function parseCompositeSeriesId(rawId, season, episode) {
 }
 function getQualityFromText(value) {
   const text = String(value || "");
-  if (/\b(?:4k|2160p)\b/i.test(text)) return "2160p";
-  const match = text.match(/\b(1440|1080|720|576|480|360|240)p\b/i);
+  if (/(?:^|[^0-9])(?:4k|2160p)(?![0-9])/i.test(text)) return "2160p";
+  const match = text.match(/(?:^|[^0-9])(1440|1080|720|576|480|360|240)p(?![0-9])/i);
   return match ? `${match[1]}p` : null;
 }
 function buildDownloadUrl(fileVal, movieTitle) {

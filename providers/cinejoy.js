@@ -345,7 +345,6 @@ if (!IS_SERVER) {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     return fetch(url, __spreadProps(__spreadValues({}, options), {
       provider: "cinejoy",
-      forceProviderProxy: true,
       signal: controller.signal
     })).finally(() => clearTimeout(timer));
   }, resolveTmdbId = function(id, providerContext = null) {
