@@ -28,6 +28,8 @@ warp-cli --accept-tos mode warp
 WARP_BYPASS_HOSTS=(
     '*.cccdn.net'
     'api.shegu.st'
+    'api.themoviedb.org'
+    'animemapping.realbestia.com'
     'info.movieboxnoob.cc'
 )
 for host in "${WARP_BYPASS_HOSTS[@]}"; do
