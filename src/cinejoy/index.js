@@ -73,7 +73,6 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   return fetch(url, {
     ...options,
     provider: 'cinejoy',
-    forceProviderProxy: true,
     signal: controller.signal
   }).finally(() => clearTimeout(timer));
 }
